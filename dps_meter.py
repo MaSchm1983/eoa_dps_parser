@@ -1,3 +1,4 @@
+import configparser
 import sys
 import os, glob, re, time, threading
 from collections import deque
@@ -6,7 +7,22 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPainter, QColor, QFont, QPen
 
 # Path to combat logs
-COMBAT_LOG_FOLDER = "C:/Users/manus/Documents/The Lord of the Rings Online"
+if getattr(sys, 'frozen', False):
+    # we’re in a PyInstaller bundle → exe lives in dist\ folder
+    base_dir = os.path.dirname(sys.executable)
+else:
+    # normal script
+    base_dir = os.path.dirname(__file__)
+
+config_path = os.path.join(base_dir, 'config.ini')
+config = configparser.ConfigParser()
+read = config.read(config_path)
+if not read:
+    raise FileNotFoundError(f"Couldn’t find config.ini at {config_path}")
+
+# now use config['Settings']['CombatLogFolder'] as before
+COMBAT_LOG_FOLDER = config.get('Settings','CombatLogFolder')
+# COMBAT_LOG_FOLDER = "C:/Users/manus/Documents/The Lord of the Rings Online"
 
 def get_latest_combat_log(folder=COMBAT_LOG_FOLDER):
     pattern = os.path.join(folder, "Combat_*.txt")
