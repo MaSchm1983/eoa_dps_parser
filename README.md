@@ -5,7 +5,7 @@ First approach for a DPS meter for Echoes of Angmar (vanilla Version of Lord of 
 ## Usage:
 
 - Download dps_parser.exe and config.ini
-- Edit path to combat log files in config.ini 
+- Edit path to combat log files in config.ini (Windows paths: make sure "\" is changed to "/" like "C:\" to "C:/") 
 - right klick on combat log chat window in lotro and select "start logging"
 - use dps_parser.exe  
 
@@ -16,5 +16,13 @@ Should work in general. Window is free movable and combat logs up to 4 past figh
 - analyzing German combat logs
 - show dps by skills, thus add classes to the code
 - built logic to deal with aoe dmg
+- anker duration and peak DPS text right aligned to right side of the fill bar
+- ctrl + c button to copy dps 
+- parsing heal and taken damage
+- 
 
+## bugs:
+
+- fill bar filling does not scale correct to peak DPS as max
+- selecting an old find twice might cause a crash of the parser
 
