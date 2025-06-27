@@ -6,7 +6,20 @@ from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QLabel, QComboBo
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPainter, QColor, QFont, QPen
 
-COMBAT_LOG_FOLDER = "C:/Users/manus/Documents/The Lord of the Rings Online"
+if getattr(sys, 'frozen', False):
+    # we’re in a PyInstaller bundle → exe lives in dist\ folder
+    base_dir = os.path.dirname(sys.executable)
+else:
+    # normal script
+    base_dir = os.path.dirname(__file__)
+
+config_path = os.path.join(base_dir, 'config.ini')
+config = configparser.ConfigParser()
+read = config.read(config_path)
+if not read:
+    raise FileNotFoundError(f"Couldn’t find config.ini at {config_path}")
+
+COMBAT_LOG_FOLDER = config.get('Settings','CombatLogFolder')
 
 def get_latest_combat_log(folder=COMBAT_LOG_FOLDER):
     pattern = os.path.join(folder, "Combat_*.txt")
@@ -80,6 +93,8 @@ class OverlayWindow(QWidget):
         self._drag_start = None
         self._resizing = False
         self.peak_dps = 0.0
+        self.peak_dps_displayed = False
+        self.last_enemy_hits = {}  # New: track per-enemy hit times
 
     def _create_widgets(self):
         self.close_btn = QPushButton('X', self)
@@ -156,7 +171,7 @@ class OverlayWindow(QWidget):
         p.setFont(FONT_TITLE)
         m = p.fontMetrics()
         yy = (TITLE_BAR_HEIGHT + m.ascent() - m.descent()) // 2 + m.descent() - 3
-        p.drawText(FRAME_PADDING, yy, "EoA DPS parser beta 1.0.1")
+        p.drawText(FRAME_PADDING, yy, "EoA DPS parser beta 1.1")
 
     def _draw_frame(self, p):
         x, y = FRAME_PADDING, self._frame_y
@@ -177,14 +192,17 @@ class OverlayWindow(QWidget):
         if idx == 0:
             enemy, duration, total = self.current_enemy, self.combat_time, self.total_damage
             ratio = self.fill_ratio
+            show_peak = self.peak_dps_displayed
+            peak_val = self.peak_dps
         else:
             s = self.fight_history[idx - 1]
-            enemy = s['enemy']
-            total = s['total']
-            duration = s['duration']
-            avg_dps = s['dps']
-            peak = s.get('peak_dps', avg_dps) or 1
-            ratio = avg_dps / peak
+            enemy    = s.get('enemy', 'unknown')
+            total    = s.get('total', 0)
+            duration = s.get('duration', 1)  # avoid div-by-zero
+            avg_dps  = s.get('dps', 0) or 1
+            peak_val = s.get('peak_dps', avg_dps) or avg_dps
+            ratio = avg_dps / peak_val if peak_val > 0 else 0
+            show_peak = True
 
         p.setFont(FONT_TEXT)
         p.setPen(COLORS['subtext'])
@@ -192,13 +210,11 @@ class OverlayWindow(QWidget):
         p.drawText(self._bar_x + self._bar_w - 100, self._bar_y + 4, f"Duration: {duration:.2f}s")
         p.drawText(self._bar_x, self._bar_y + BAR_HEIGHT + 28, f"Total damage: {total}")
 
-        show_peak = (idx != 0) or (self.combat_time >= 3.0)
-        if show_peak:
-            peak_val = self.peak_dps if idx == 0 else s.get('peak_dps', 0)
-            peak_str = f"Peak DPS: {int(peak_val)}"
-            fm = p.fontMetrics()
-            text_w = fm.boundingRect(peak_str).width()
-            p.drawText(self._bar_x + self._bar_w - text_w - 10, self._bar_y + BAR_HEIGHT + 28, peak_str)
+        peak_str = f"Peak DPS: {int(peak_val)}" if show_peak else "Peak DPS: -"
+        peak_val = self.peak_dps if idx == 0 else s.get('peak_dps', 0)
+        fm = p.fontMetrics()
+        text_w = fm.boundingRect(peak_str).width()
+        p.drawText(self._bar_x + self._bar_w - text_w - 10, self._bar_y + BAR_HEIGHT + 28, peak_str)
 
         p.setPen(QPen(COLORS['frame'], 2))
         p.setBrush(COLORS['bar_bg'])
@@ -226,8 +242,6 @@ class OverlayWindow(QWidget):
                     et, dmg, en = self._parse_line(line)
                     if et == 'hit':
                         self._on_hit(dmg, en)
-                    elif et == 'defeated':
-                        self._on_defeated()
                 else:
                     time.sleep(0.05)
 
@@ -248,9 +262,10 @@ class OverlayWindow(QWidget):
 
     def _on_hit(self, dmg, en):
         now = time.time()
+        self.last_enemy_hits[en] = now  # Update hit time
         self.copy_button.setEnabled(False)
         if not self.fight_active:
-            if self.last_stop_time and (now - self.last_stop_time) < 3.0:
+            if self.last_stop_time and (now - self.last_stop_time) < 2.0:
                 return
             self.fight_active = True
             self.start_time = now
@@ -258,6 +273,7 @@ class OverlayWindow(QWidget):
             self.total_damage = 0
             self.damage_events.clear()
             self.peak_dps = 0.0
+            self.peak_dps_displayed = False
 
         self.total_damage += dmg
         self.last_hit_time = now
@@ -270,21 +286,23 @@ class OverlayWindow(QWidget):
             self.damage_events.popleft()
         win_dmg = sum(d for t, d in self.damage_events)
         win_dur = min(window, self.combat_time)
-        current_dps = win_dmg / (win_dur or 1)
+        if self.combat_time < 1.0:
+            current_dps = 0  # or None, or skip updating peak
+        else:
+            current_dps = win_dmg / win_dur
+            
         if current_dps > self.peak_dps:
             self.peak_dps = current_dps
+            
+        if self.combat_time >= 3.0:
+            self.peak_dps_displayed = True
+            
         self.fill_ratio = current_dps / self.peak_dps if self.peak_dps > 0 else 0
-
         self.update()
-
-    def _on_defeated(self):
-        if self.pending_timer:
-            self.pending_timer.cancel()
-        self.pending_timer = threading.Timer(1.0, self._stop_fight)
-        self.pending_timer.start()
-
+        
     def _stop_fight(self):
         self.fight_active = False
+        self.combat_time = self.last_hit_time - self.start_time if self.last_hit_time else 0.0
         summary = {
             'enemy': self.current_enemy,
             'total': self.total_damage,
@@ -301,14 +319,24 @@ class OverlayWindow(QWidget):
         self.combo.setCurrentIndex(0)
         self.combo.blockSignals(False)
         self.last_stop_time = time.time()
+        self.combat_time = self.last_hit_time - self.start_time
         self.pending_timer = None
         self.copy_button.setEnabled(True)
+        self.last_enemy_hits.clear()
         self.update()
 
     def _tick(self):
         if self.fight_active:
-            self.combat_time = time.time() - self.start_time
-            self.update()
+            now = time.time()
+            self.combat_time = now - self.start_time
+            last = self.last_enemy_hits.get(self.current_enemy, 0)
+            if now - last > 3.5:
+                self._stop_fight()
+            else:
+                self.combat_time = now - self.start_time
+                if self.combat_time >= 3.0:
+                    self.peak_dps_displayed = True
+                self.update()
 
     def close(self):
         self._running = False
