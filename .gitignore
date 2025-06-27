@@ -3,10 +3,9 @@ __pycache__/
 *.py[cod]
 *.log
 dist/
+build/
 *.spec
 .DS_Store
-build/
 dps_parser.py
 overlay_raw.py
 dps_overlay_raw.py
-*.ini
