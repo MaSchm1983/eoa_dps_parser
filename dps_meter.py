@@ -21,10 +21,12 @@ if not read:
 
 COMBAT_LOG_FOLDER = config.get('Settings','CombatLogFolder')
 
+
 def get_latest_combat_log(folder=COMBAT_LOG_FOLDER):
     pattern = os.path.join(folder, "Combat_*.txt")
     files = glob.glob(pattern)
     return max(files, key=os.path.getmtime) if files else None
+
 
 # Styling & Layout
 WINDOW_WIDTH = 400
@@ -398,3 +400,4 @@ if __name__ == '__main__':
     ov = OverlayWindow()
     ov.show()
     sys.exit(app.exec_())
+
