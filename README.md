@@ -16,10 +16,10 @@ Should work in general. Window is free movable and combat logs up to 4 past figh
 - analyzing German combat logs
 - show dps by skills, thus add classes to the code
 - built logic to deal with aoe dmg
-- anker duration and peak DPS text right aligned to right side of the fill bar
-- ctrl + c button to copy dps 
+- built logic to stop fight without defeat message since lotro won't show defeat event when other player land a killing blow
 - parsing heal and taken damage
 - 
+ 
 
 ## bugs:
 
