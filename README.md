@@ -24,5 +24,5 @@ Should work in general. Window is free movable and combat logs up to 4 past figh
 ## bugs:
 
 - fill bar filling does not scale correct to peak DPS as max
-- selecting an old find twice might cause a crash of the parser
+- selecting an old combat log again might cause a crash of the parser
 
