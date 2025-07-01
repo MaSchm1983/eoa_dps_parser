@@ -40,7 +40,7 @@ from config import (
 ###############################################################################
 ####### Parse for config.ini where the path to combat log is located    #######
 ###############################################################################
-'''
+
 if getattr(sys, 'frozen', False):
     # we’re in a PyInstaller bundle → exe lives in dist\ folder
     base_dir = os.path.dirname(sys.executable)
@@ -55,8 +55,8 @@ if not read:
     raise FileNotFoundError(f"Couldn’t find config.ini at {config_path}")
 
 COMBAT_LOG_FOLDER = config.get('Settings','CombatLogFolder')
-'''
-COMBAT_LOG_FOLDER = "C:/Users/manus/Documents/The Lord of the Rings Online"
+
+
 # ── Helper to read current combat log (will be updated every 5s later) ── 
 
 def get_latest_combat_log(folder=COMBAT_LOG_FOLDER):
