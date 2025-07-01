@@ -9,4 +9,6 @@ build/
 dps_parser.py
 overlay_raw.py
 dps_overlay_raw.py
+dpsOverlay_1.2.0_working.py
 config.ini
+test_*
