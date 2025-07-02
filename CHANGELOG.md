@@ -5,6 +5,13 @@ All notable changes to the DPS parser for Echos of Angmar will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Beta [0.9.2.1] - 2025-06-30
+
+### bugfixes:
+- fixed a minor back where max hit and max hitting skill does not reset properly at the "Parse on hit mode"
+- Fixed a big issue with pets in general. LM and cappy pets should now get their damage tracked and added to the players damage.
+- Fixed a bug with some skills not being tracked since they don't have a skill name (e.g. wizards fire or burning embers dot damage). This now counts as "no specific skill" for a first approach
+
 ## Beta [0.9.2] - 2025-06-30
 
 ## Added
