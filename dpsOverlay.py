@@ -340,7 +340,7 @@ class OverlayWindow(QWidget):
         p.setFont(FONT_TITLE)
         m = p.fontMetrics()
         yy = (TITLE_BAR_HEIGHT + m.ascent() - m.descent()) // 2 + m.descent() - 3
-        p.drawText(FRAME_PADDING, yy, "EoA DPS parser beta 0.9.2")
+        p.drawText(FRAME_PADDING, yy, "EoA DPS parser beta 0.9.2.2")
 
     def _draw_frame(self, p):
         x, y = FRAME_PADDING, self._frame_y
@@ -570,31 +570,69 @@ class OverlayWindow(QWidget):
             f.seek(0, 2)
             while getattr(self, '_running', False):
                 line = f.readline()
-                if line:
-                    et, dmg, en, skl= self._parse_line(line)
-                    if et == 'hit':
-                        self._on_hit(dmg, en, skl)
-                else:
+                if not line:
+                    # no new data yet
                     time.sleep(0.05)
+                    continue
+
+                parsed = self._parse_line(line)
+                if parsed is None:
+                    # either it wasn't a “you hit…” or a pet hit → skip
+                    continue
+
+                et, dmg, en, skl = parsed
+                if et == 'hit':
+                    self._on_hit(dmg, en, skl) 
 
     def _parse_line(self, line):
-        # “You hit … with SKILL for DAMAGE”
-        m_hit = re.search(
-            r"You (?:critically )?hit(?: the)?\s+(.+?)\s+with\s+(.+?)\s+for\s+([\d,]+)",
-            line, re.IGNORECASE
-        )
-        if m_hit:
-            enemy  = m_hit.group(1)
-            skill  = m_hit.group(2)
-            dmg_str = m_hit.group(3).replace(',', '')
-            try:
-                dmg = int(dmg_str)
-            except ValueError:
-                return None, None, None, None
-            return 'hit', dmg, enemy, skill
+        """
+        Return (“hit”, dmg, enemy, skill) or None.
 
-        # fallback: other lines
-        return None, None, None, None
+        Includes:
+        • “You hit …”
+        • “The <Pet> hits …” (only when skill contains “Fast”)
+        """
+        text = line.strip()
+
+        # Quick sanity checks
+        if " hit " not in text and " hits " not in text:
+            return None
+        if " for " not in text or " points" not in text:
+            return None
+
+        # Skip enemy→you/pet hits (they never include “Fast”)
+        if not text.startswith("You ") and "Fast" not in text:
+            return None
+
+        # Split off the actor
+        if " hit " in text:
+            actor, rest = text.split(" hit ", 1)
+        else:
+            actor, rest = text.split(" hits ", 1)
+
+        # Strip leading “the ” if present
+        if rest.lower().startswith("the "):
+            rest = rest[4:].lstrip()
+
+        # Extract damage (after last “ for … points”)
+        try:
+            before_for, after_for = rest.rsplit(" for ", 1)
+            dmg_str = after_for.split(" ", 1)[0]
+            digits_only = re.sub(r"[^\d]", "", dmg_str)
+            dmg = int(digits_only)
+        except Exception:
+            return None
+
+        # Extract skill vs. enemy
+        if " with " in before_for:
+            enemy_part, skill_part = before_for.split(" with ", 1)
+            skill = skill_part.strip()
+        else:
+            enemy_part = before_for
+            skill = "no specific skill"
+
+        enemy = enemy_part.strip()
+        return ("hit", dmg, enemy, skill)
 
     def _on_hit(self, dmg, en, skill):
         now = time.time()
@@ -625,6 +663,8 @@ class OverlayWindow(QWidget):
             self.last_hit_time        = now
             self.current_enemy        = en
             self.total_damage         = 0
+            self.max_hit              = 0
+            self.max_hit_skill        = "--"
             self.damage_events.clear()
             self.peak_dps             = 0.0
             self.peak_dps_displayed   = False
