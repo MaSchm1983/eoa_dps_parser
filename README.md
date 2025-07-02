@@ -9,7 +9,8 @@ What does dpsOverlay.exe do? Basically only show what you can see already ingame
 
 #### How does dpsOverlay.exe work?
 
-dpsOverlay.exe is a standalone version of a coded analysing overlay tool with PyQt5. Once you started the .exe you'll get a partwise transparent little window you can move whereever you want on your screen. Per default you can just start damaging and will see automatic DPS values, total damage, biggest hit and biggest hitting skill (all for current) fight. You can also review past fight within the "select combat" dropdown menu. (**Don't forget to start chat logging in LoTro!!** No combat log, no combat, it's that easy ;-) ). It started cause by default your in the "Parse on hit" logic. The other option is the "Parse on start/stop", you can easy switch between both parsing methods between fights by clicking the button. 
+dpsOverlay.exe is a standalone version of a coded analysing overlay tool with PyQt5. Once you started the .exe you'll get a transparent little window you can move where ever you want on your screen. **Note: since a fullscreen game mode deactivated desktop layering, the olverlay only works in windowed or borderless windowed mode!!**.
+Once you're ready to start, per default you can just start damaging and will see automatic DPS values, total damage, biggest hit and biggest hitting skill (all for current) fight. You can also review past fight within the "select combat" dropdown menu. (**Don't forget to start chat logging in LoTro!!** No combat log, no combat, it's that easy ;-) ). It started cause by default your in the "Parse on hit" logic. The other option is the "Parse on start/stop", you can easy switch between both parsing methods between fights by clicking the button. 
 
 Difference between both parsing methods:
 
