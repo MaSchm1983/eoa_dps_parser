@@ -56,13 +56,13 @@ If you just wanna track some damage during questing etc. I recommend the first "
 - Add dps over time small diagram
 - Add all aoe skills to differ between single target and aoe (need to be thought about a bit in depth)
 - cleaning code
+- keep an eye on the problem, that enemies damage to a pet might count as own damage since this is pretty hard to sort out
 
-## bugs:
+## current bugs:
 
 - hunters heartseaker cause a stop of parsing due to long induction time. if after 3.5s no hit occurs in log, the fight is currently seen as ended. (Hard to fix, but dealt with new start/stop parsing logic)
 - fill bar filling does not scale correct to peak DPS as max (should now work)
 - selecting an old combat log again might cause a crash of the parser (should now work)
 - some struggleson special characters like in Tarkrîp need to be fixed with unicodedata or anything else
-- loremaster wizard fire doesn't count ==> You hit the Snow-lurker for 51 points of Light damage to Morale. But routine tracks for skill name before "for" and this dosen't occur here. Thus I need to set group3 (DMG) fix on searching between "for" and "points"
-- LM and cappy pets: Tracking of their damage does currently not work. 
+
 
