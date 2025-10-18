@@ -21,8 +21,7 @@
 ###############################################################################
 
 
-
-import sys, configparser
+import sys, configparser, os, glob, re
 from pathlib import Path
 
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QLabel, QComboBox, QCheckBox
@@ -38,6 +37,49 @@ from config import (
     FONT_TITLE, FONT_SUBTITLE, FONT_BTN_TEXT,
     FONT_TEXT, FONT_TEXT_CLS_BTN, COLORS
 )
+from combatAnalyseOverlay import CombatAnalyseOverlay
+
+
+###############################################################################
+##################### Parse for config.ini for infos ##########################
+###############################################################################
+
+# ── searching and loading for config.ini ── 
+if getattr(sys, 'frozen', False):
+    # we’re in a PyInstaller bundle → exe lives in dist\ folder
+    base_dir = os.path.dirname(sys.executable)
+else:
+    # normal script
+    base_dir = os.path.dirname(__file__)
+
+config_path = os.path.join(base_dir, 'config.ini')
+config = configparser.ConfigParser()
+read = config.read(config_path)
+if not read:
+    raise FileNotFoundError(f"Couldn’t find config.ini at {config_path}")
+
+COMBAT_LOG_FOLDER = config.get('Settings','CMBT_LOG_DIR')
+
+# ── get pet names from config.ini ──
+pets_raw = (
+    config.get('Pets', 'name', fallback='') or
+    config.get('Pets', 'names', fallback='')
+)
+PET_NAMES = {
+    n.strip().lower()
+    for n in re.split(r'[,\n;]+', pets_raw)
+    if n.strip()
+}
+
+DEBUG_PARSE = config.getboolean('Settings', 'DEBUG_PARSE', fallback=False)
+
+# ── Helper to read current combat log (will be updated every 5s later) ── 
+
+def get_latest_combat_log(folder=COMBAT_LOG_FOLDER):
+    pattern = os.path.join(folder, "Combat_*.txt")
+    files = glob.glob(pattern)
+    return max(files, key=os.path.getmtime) if files else None
+
 
 ###############################################################################
 #######           Helper for colors and button styles                   #######    
@@ -119,6 +161,26 @@ class OverlayWindow(QWidget):
         self.combat_time = 0.0
         self.max_hit = 0
         self.max_hit_skill = '--'
+        
+         # --- Manual-Run State ---
+        self.manual_running = False
+        self.manual_waiting = False
+        self.manual_start_time = None
+        self.manual_events = []          # [{time, dmg, enemy, skill}]
+        self.manual_matrix = []          # [[time, dmg, enemy, skill]]
+
+        # --- Tail-Thread State ---
+        self._current_log_path = None
+        self._tail_thread = None
+        self._tail_should_run = False
+
+        # --- UI/Timer ---
+        from PyQt5.QtCore import QTimer
+        self._ui_timer = QTimer(self)
+        self._ui_timer.timeout.connect(self._tick)
+        self._ui_timer.start(100)  # smooth time label while running
+        
+        
 
     # ── 1) add a chose mode snippet for damage, heal or damage taken ──
     def _create_stat_mode_buttons(self):
@@ -188,6 +250,7 @@ class OverlayWindow(QWidget):
         self.start_stop_btn.setFont(FONT_BTN_TEXT)
         self.start_stop_btn.setFixedSize(STARTSTOP_BTN_WIDTH, STARTSTOP_BTN_HEIGHT)
         apply_style(self.start_stop_btn, bg=COLORS['button_noactive'], text_color=rgba(COLORS['line_col']))
+        self.start_stop_btn.clicked.connect(self._toggle_manual)
 
         # ── select targets for manual parsed combat ──
         self.manual_combo = QComboBox(self)
@@ -196,6 +259,7 @@ class OverlayWindow(QWidget):
         #self.manual_combo.setFixedWidth(150)
         self.manual_combo.setStyleSheet("QComboBox{background:rgba(100,100,100,125);color:white;}")
         self.manual_combo.addItem("Total")
+        self.manual_combo.currentIndexChanged.connect(self._on_manual_selection)
 
         self.manual_label = QLabel("Select target:", self)
         self.manual_label.setFont(FONT_SUBTITLE)
@@ -222,6 +286,7 @@ class OverlayWindow(QWidget):
             border_w=1,
             bold=True
         )
+        self.analyse_btn.clicked.connect(self.open_analysis_overlay)
         
         
         self.auto_stop_cb = QCheckBox("stop combat after 30s", self)
@@ -244,6 +309,7 @@ class OverlayWindow(QWidget):
         self.copy_btn.setFont(FONT_BTN_TEXT)
         self.copy_btn.setFixedSize(60, 25)
         apply_style(self.copy_btn, bg=QColor(0,0,0,0), text_color=rgba(COLORS['line_col']))
+        self.copy_btn.clicked.connect(self._copy_to_clipboard)
 
 
     # ── 5) styling updated for layout and update on interaction/events ──
@@ -430,9 +496,236 @@ class OverlayWindow(QWidget):
 
     ###--- End: functionality functions and parsing routines ---###
     
-    
 
     ###--- Start: helper functions for interaction with overlay ---###
+    
+    # --- Tail Lifecycle ---
+    def _ensure_log_thread(self):
+        if self._tail_thread and self._tail_thread.is_alive():
+            return
+        path = get_latest_combat_log()
+        if not path:
+            return
+        self._current_log_path = path
+        self._tail_should_run = True
+        import threading, time, os
+        def _tail_loop(pth):
+            try:
+                with open(pth, 'r', encoding='utf-8', errors='ignore') as f:
+                    f.seek(0, os.SEEK_END)
+                    while self._tail_should_run:
+                        line = f.readline()
+                        if not line:
+                            time.sleep(0.05)
+                            continue
+                        parsed = self._parse_line(line)
+                        if not parsed:
+                            continue
+                        et, dmg, enemy, skill = parsed
+                        if et == 'hit':
+                            self._on_manual_hit(dmg, enemy, skill)
+                        if DEBUG_PARSE:
+                            print(f"[PARSED] {line.rstrip()}  ->  dmg={dmg}, enemy='{enemy}', skill='{skill}'")
+            except Exception:
+                pass
+        import threading
+        self._tail_thread = threading.Thread(target=_tail_loop, args=(path,), daemon=True)
+        self._tail_thread.start()
+
+    def _stop_log_thread(self):
+        self._tail_should_run = False
+        # daemon thread – kein join nötig
+        
+    # --- Logzeile -> Event ---
+    def _parse_line(self, line):
+        """
+        Zählt:
+        - "You hit Goblin for 123 points with Swift Strike."
+        - "The Lynx hits the Dourhand Scout with Surprise Attack for 282 points of Common damage to Morale."
+        Rückgabe: ("hit", dmg:int, enemy:str, skill:str) oder None
+        """
+        text = line.strip()
+        if not text:
+            return None
+
+        # an " hit " / " hits " trennen
+        hit_kw = " hit " if " hit " in text else (" hits " if " hits " in text else None)
+        if not hit_kw:
+            return None
+        try:
+            actor, rest = text.split(hit_kw, 1)
+        except ValueError:
+            return None
+
+        actor_lc = actor.strip().lower()
+        if actor_lc.startswith("the "):
+            actor_lc = actor_lc[4:].lstrip()
+
+        # nur eigene Hits oder Pet-Hits
+        is_you = actor_lc.startswith("you")
+        is_pet = actor_lc in PET_NAMES
+        if not (is_you or is_pet):
+            return None
+
+        # ggf. "the " vor Gegner entfernen
+        if rest.lower().startswith("the "):
+            rest = rest[4:].lstrip()
+
+        # Schaden extrahieren
+        if " for " not in rest or " points" not in rest:
+            return None
+        try:
+            before_for, after_for = rest.rsplit(" for ", 1)
+            dmg_token = after_for.split(" points", 1)[0]
+            dmg = int(re.sub(r"[^\d]", "", dmg_token))  # erlaubt 1,234
+        except Exception:
+            return None
+
+        # Enemy & Skill
+        if " with " in before_for:
+            enemy_part, skill_part = before_for.split(" with ", 1)
+            skill = skill_part.strip().rstrip(".")
+        else:
+            enemy_part = before_for
+            skill = "DoT damage"
+        enemy = enemy_part.strip().rstrip(".")
+
+        return ("hit", dmg, enemy, skill)
+
+    # --- Manual-Hit Verarbeitung ---
+    def _on_manual_hit(self, dmg: int, enemy: str, skill: str):
+        if not self.manual_running:
+            return
+        import time
+        now = time.time()
+        # Startzeit beim allerersten Treffer setzen
+        if self.manual_waiting:
+            self.manual_waiting = False
+            self.manual_start_time = now
+
+        rel_t = (now - self.manual_start_time) if self.manual_start_time else 0.0
+
+        evt = {"time": rel_t, "dmg": dmg, "enemy": enemy, "skill": skill}
+        self.manual_events.append(evt)
+        self.manual_matrix.append([rel_t, dmg, enemy, skill])
+
+        # Anzeige aggregieren
+        self.total_damage += dmg
+        if dmg > self.max_hit:
+            self.max_hit = dmg
+            self.max_hit_skill = skill
+        self.combat_time = rel_t
+        self.current_enemy = "Total"
+
+        # Auto-Stop (30s) wenn Checkbox an
+        if self.auto_stop_cb.isChecked() and self.combat_time >= 30.0:
+            self._toggle_manual()  # stoppt
+
+        self.update()    
+    
+    def _toggle_manual(self):
+        if not self.manual_running:
+            # --- START ---
+            self.manual_running = True
+            self.manual_waiting = True
+            self.manual_start_time = None
+            self.total_damage = 0
+            self.combat_time = 0.0
+            self.max_hit = 0
+            self.max_hit_skill = '--'
+            self.current_enemy = '--'
+            self.manual_events.clear()
+            self.manual_matrix.clear()
+            self.start_stop_btn.setText("Stop")
+            apply_style(self.start_stop_btn, bg=COLORS['button_active'], text_color="white", bold=True)
+
+            # Tailer aktivieren
+            self._ensure_log_thread()
+
+            # Ziel-Dropdown leeren/aufbauen
+            self.manual_combo.blockSignals(True)
+            self.manual_combo.clear()
+            self.manual_combo.addItem("Total")
+            self.manual_combo.blockSignals(False)
+
+        else:
+            # --- STOP ---
+            self.manual_running = False
+            self.manual_waiting = False
+            self.start_stop_btn.setText("Start")
+            apply_style(self.start_stop_btn, bg=COLORS['button_noactive'], text_color=rgba(COLORS['line_col']))
+
+            # Tailer im Manual-Mode beenden (spart IO). Du kannst ihn anlassen, wenn du willst.
+            self._stop_log_thread()
+
+            # Dropdown mit Zielen füllen
+            names = sorted({e['enemy'] for e in self.manual_events})
+            self.manual_combo.blockSignals(True)
+            self.manual_combo.clear()
+            self.manual_combo.addItem("Total")
+            for n in names:
+                self.manual_combo.addItem(n)
+            self.manual_combo.setCurrentIndex(0)
+            self.manual_combo.blockSignals(False)
+
+            # Combat-Time finalisieren (falls keine Hits: 0.0)
+            if self.manual_events:
+                self.combat_time = self.manual_events[-1]['time']
+            else:
+                self.combat_time = 0.0
+
+            self.update()
+    
+    def _on_manual_selection(self):
+        if self.manual_running or not self.manual_events:
+            return
+        sel = self.manual_combo.currentText()
+        if sel == "Total":
+            self.total_damage = sum(e['dmg'] for e in self.manual_events)
+            self.combat_time = self.manual_events[-1]['time'] if self.manual_events else 0.0
+            self.current_enemy = "Total"
+            # Max-Hit global
+            mx = max(self.manual_events, key=lambda e: e['dmg']) if self.manual_events else None
+        else:
+            evts = [e for e in self.manual_events if e['enemy'] == sel]
+            self.total_damage = sum(e['dmg'] for e in evts)
+            self.combat_time = (evts[-1]['time'] - evts[0]['time']) if len(evts) > 1 else 0.0
+            self.current_enemy = sel
+            mx = max(evts, key=lambda e: e['dmg']) if evts else None
+        if mx:
+            self.max_hit = mx['dmg']
+            self.max_hit_skill = mx['skill']
+        else:
+            self.max_hit = 0
+            self.max_hit_skill = '--'
+        self.update()
+    
+    # --- runtime ticker ---
+    def _tick(self):
+        if self.manual_running and not self.manual_waiting and self.manual_start_time:
+            import time
+            self.combat_time = time.time() - self.manual_start_time
+            self.update()
+            
+    def _copy_to_clipboard(self):
+        # Ausgabe je nach Auswahl
+        sel = self.manual_combo.currentText()
+        if sel == "Total":
+            total = sum(e['dmg'] for e in self.manual_events)
+            duration = self.manual_events[-1]['time'] if self.manual_events else 0.0
+            target = "all targets"
+        else:
+            evts = [e for e in self.manual_events if e['enemy'] == sel]
+            total = sum(e['dmg'] for e in evts)
+            duration = (evts[-1]['time'] - evts[0]['time']) if len(evts) > 1 else 0.0
+            target = sel
+        dps = int(total / (duration or 1))
+        QApplication.clipboard().setText(f"You dealt {total} damage over {duration:.1f}s to {target} (DPS: {dps})")        
+            
+    def get_manual_matrix(self):
+        return ["rel_time_s", "damage", "enemy", "skill"], list(self.manual_matrix) 
+        
+    # --- mouse action ---
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
             self._drag_start = e.globalPos() - self.frameGeometry().topLeft(); e.accept()
@@ -441,6 +734,29 @@ class OverlayWindow(QWidget):
             self.move(e.globalPos() - self._drag_start); e.accept()
     def mouseReleaseEvent(self, e):
         self._drag_start = None; super().mouseReleaseEvent(e)
+
+    # --- open analysis overlay ---
+    def open_analysis_overlay(self):
+        # Gather data you want to send (example structure, adapt as needed)
+        enemy = self.current_enemy
+        stat_mode = self.stat_mode
+        total_time = self.combat_time
+        skill_stats = [
+            # Example: list of dicts, each for a skill (you’ll fill this out from your parsing later)
+            # {'skill': 'Devastating Blow', 'total': 1234, 'dps': 432, ...},
+        ]
+        # Instantiate the analysis overlay, pass the stats
+        self.analysis_window = CombatAnalyseOverlay(
+            parent=self,   # makes it a child window, optional
+            enemy=enemy,
+            stat_mode=stat_mode,
+            total_time=total_time,
+            skill_stats=skill_stats
+        )
+        # Position it below the current overlay
+        geo = self.geometry()
+        self.analysis_window.move(geo.left(), geo.bottom() + 4)
+        self.analysis_window.show()
 
     ###--- End: helper functions for interaction with overlay ---###
 
@@ -453,8 +769,6 @@ class OverlayWindow(QWidget):
 ###############################################################################    
 
 if __name__ == "__main__":
-    cfg = load_config()
-    print("Pets names:", cfg.get("Pets","names"))
     app = QApplication(sys.argv)
     ov = OverlayWindow()
     ov.show(); sys.exit(app.exec_())
