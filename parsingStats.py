@@ -22,6 +22,7 @@
 
 
 import sys, configparser, os, glob, re
+import time
 from pathlib import Path
 
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QLabel, QComboBox, QCheckBox
@@ -140,7 +141,8 @@ class OverlayWindow(QWidget):
         self._init_data()                 # 3) init any kind of needed data for parsing
         self._create_widgets()            # 4) create all widgets on the overlay
         
-        self._update_layout()    # 5) update layout on interact function
+        self._update_layout()             # 5) update layout on interact function
+
 
     # ── 2) init window size and attributes on startup ──
     def _init_window(self):
@@ -179,7 +181,6 @@ class OverlayWindow(QWidget):
         self._ui_timer = QTimer(self)
         self._ui_timer.timeout.connect(self._tick)
         self._ui_timer.start(100)  # smooth time label while running
-        
         
 
     # ── 1) add a chose mode snippet for damage, heal or damage taken ──
@@ -250,7 +251,7 @@ class OverlayWindow(QWidget):
         self.start_stop_btn.setFont(FONT_BTN_TEXT)
         self.start_stop_btn.setFixedSize(STARTSTOP_BTN_WIDTH, STARTSTOP_BTN_HEIGHT)
         apply_style(self.start_stop_btn, bg=COLORS['button_noactive'], text_color=rgba(COLORS['line_col']))
-        self.start_stop_btn.clicked.connect(self._toggle_manual)
+        self.start_stop_btn.clicked.connect(self._toggle_startstop)
 
         # ── select targets for manual parsed combat ──
         self.manual_combo = QComboBox(self)
@@ -289,7 +290,7 @@ class OverlayWindow(QWidget):
         self.analyse_btn.clicked.connect(self.open_analysis_overlay)
         
         
-        self.auto_stop_cb = QCheckBox("stop combat after 30s", self)
+        self.auto_stop_cb = QCheckBox("stop combat after 15s", self)
         self.auto_stop_cb.setFont(FONT_TEXT)
         self.auto_stop_cb.setStyleSheet("""
             QCheckBox {
@@ -364,8 +365,6 @@ class OverlayWindow(QWidget):
         self.analyse_btn.move(bar_x, analyse_y)
         self.analyse_btn.show()
                 
-        
-
         # ── start/stop button and auto stop checkbox ──
         self.start_stop_btn.show()
         ss_x = FRAME_PADDING + BAR_PADDING
@@ -376,11 +375,7 @@ class OverlayWindow(QWidget):
         cb_y = ss_y + (self.start_stop_btn.height() - self.auto_stop_cb.sizeHint().height()) // 2  # vertical align
         self.auto_stop_cb.move(cb_x, cb_y)
         self.auto_stop_cb.show()
-        
-        
-
-
-
+                
         # ── position copy button: left padding, centered vertically in leftover space ──
         copy_x = self.width() - self.copy_btn.width() - FRAME_PADDING
         copy_y = MAX_HEIGHT - STARTSTOP_BTN_HEIGHT - 2*FRAME_PADDING
@@ -436,12 +431,16 @@ class OverlayWindow(QWidget):
         p.fillRect(bar_x, bar_y + 10, bar_w, BAR_HEIGHT, bar_fill_map.get(self.stat_mode, COLORS['bar_fill']))
         
         p.setFont(FONT_TEXT); p.setPen(COLORS['subtext'])
-        p.drawText(bar_x, bar_y + 4, f"Total damage: {self.total_damage}")
-        p.drawText(bar_x, bar_y + BAR_HEIGHT + 28, f"Duration: {self.combat_time:.2f}s")
-        max_str = f"Max hit: {self.max_hit}"; mw = fm.boundingRect(max_str).width()
-        p.drawText(bar_x + bar_w - mw - 10, bar_y + 4, max_str)
-        skill_str = f"max hitting skill: {self.max_hit_skill}"; sw = fm.boundingRect(skill_str).width()
-        p.drawText(bar_x + bar_w - sw - 10, bar_y + BAR_HEIGHT + 28, skill_str)
+        p.drawText(bar_x+1, bar_y + 4, f"Total damage: {self.total_damage}")
+        # p.drawText(bar_x+2, bar_y + BAR_HEIGHT + 28, f"Duration: {self.combat_time:.2f}s")
+        dur_str = f"Duration: {self.combat_time:.2f}s";  mw = fm.boundingRect(dur_str).width()
+        p.drawText(bar_x + bar_w - mw + 10, bar_y + 4, f"Duration: {self.combat_time:.2f}s")
+        max_hit_str = f"Biggest hit: {self.max_hit} with {self.max_hit_skill}"; mw = fm.boundingRect(max_hit_str).width()
+        p.drawText(bar_x+2, bar_y + BAR_HEIGHT + 28, max_hit_str)
+        # max_str = f"Biggest hit: {self.max_hit}"; mw = fm.boundingRect(max_str).width()
+        # p.drawText(bar_x + bar_w - mw - 10, bar_y + 4, max_hit_str)
+        # skill_str = f"max hitting skill: {self.max_hit_skill}"; sw = fm.boundingRect(skill_str).width()
+        # p.drawText(bar_x + bar_w - sw - 10, bar_y + BAR_HEIGHT + 28, skill_str)
         p.end()
 
     ###--- End: initializing functions and update of the overlay ---###
@@ -501,14 +500,15 @@ class OverlayWindow(QWidget):
     
     # --- Tail Lifecycle ---
     def _ensure_log_thread(self):
+        # wenn Thread läuft: gut; Retry-Timer kann weiterlaufen oder gestoppt werden
         if self._tail_thread and self._tail_thread.is_alive():
             return
         path = get_latest_combat_log()
         if not path:
+            # noch keine Datei gefunden – wir probieren es beim nächsten Retry wieder
             return
         self._current_log_path = path
         self._tail_should_run = True
-        import threading, time, os
         def _tail_loop(pth):
             try:
                 with open(pth, 'r', encoding='utf-8', errors='ignore') as f:
@@ -523,10 +523,11 @@ class OverlayWindow(QWidget):
                             continue
                         et, dmg, enemy, skill = parsed
                         if et == 'hit':
-                            self._on_manual_hit(dmg, enemy, skill)
+                            self._on_hit(dmg, enemy, skill)
                         if DEBUG_PARSE:
                             print(f"[PARSED] {line.rstrip()}  ->  dmg={dmg}, enemy='{enemy}', skill='{skill}'")
             except Exception:
+                # still retry later if something goes wrong
                 pass
         import threading
         self._tail_thread = threading.Thread(target=_tail_loop, args=(path,), daemon=True)
@@ -585,6 +586,8 @@ class OverlayWindow(QWidget):
         if " with " in before_for:
             enemy_part, skill_part = before_for.split(" with ", 1)
             skill = skill_part.strip().rstrip(".")
+            if "Weapon Attack" in skill:
+                skill = "Autoattack"
         else:
             enemy_part = before_for
             skill = "DoT damage"
@@ -593,15 +596,14 @@ class OverlayWindow(QWidget):
         return ("hit", dmg, enemy, skill)
 
     # --- Manual-Hit Verarbeitung ---
-    def _on_manual_hit(self, dmg: int, enemy: str, skill: str):
+    def _on_hit(self, dmg: int, enemy: str, skill: str):
         if not self.manual_running:
             return
-        import time
         now = time.time()
         # Startzeit beim allerersten Treffer setzen
         if self.manual_waiting:
             self.manual_waiting = False
-            self.manual_start_time = now
+            self.manual_start_time = now            
 
         rel_t = (now - self.manual_start_time) if self.manual_start_time else 0.0
 
@@ -617,13 +619,9 @@ class OverlayWindow(QWidget):
         self.combat_time = rel_t
         self.current_enemy = "Total"
 
-        # Auto-Stop (30s) wenn Checkbox an
-        if self.auto_stop_cb.isChecked() and self.combat_time >= 30.0:
-            self._toggle_manual()  # stoppt
-
         self.update()    
     
-    def _toggle_manual(self):
+    def _toggle_startstop(self):
         if not self.manual_running:
             # --- START ---
             self.manual_running = True
@@ -676,6 +674,8 @@ class OverlayWindow(QWidget):
 
             self.update()
     
+   
+    
     def _on_manual_selection(self):
         if self.manual_running or not self.manual_events:
             return
@@ -702,10 +702,11 @@ class OverlayWindow(QWidget):
     
     # --- runtime ticker ---
     def _tick(self):
+        # Laufzeit während Kampf
         if self.manual_running and not self.manual_waiting and self.manual_start_time:
-            import time
             self.combat_time = time.time() - self.manual_start_time
             self.update()
+                
             
     def _copy_to_clipboard(self):
         # Ausgabe je nach Auswahl
