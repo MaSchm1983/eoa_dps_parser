@@ -52,3 +52,10 @@ COLORS = {
     'subtext':         QColor(  0,   0,   0),
     'white':           QColor(255, 255, 255, int(1.0*255)),
 }
+
+AA_SKILLS = {
+    "Dual-wield Attack",
+    "Bow Attack",
+    "Weapon Attack",
+    "1H Weapon/Shield Attack"
+}
