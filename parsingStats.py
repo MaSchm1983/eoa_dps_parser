@@ -36,7 +36,7 @@ from config import (
     BAR_HEIGHT, BAR_PADDING, BAR_TOP_OFFSET, 
     STAT_FRAME_HEIGHT, STARTSTOP_BTN_WIDTH, STARTSTOP_BTN_HEIGHT, 
     FONT_TITLE, FONT_SUBTITLE, FONT_BTN_TEXT,
-    FONT_TEXT, FONT_TEXT_CLS_BTN, COLORS
+    FONT_TEXT, FONT_TEXT_CLS_BTN, COLORS, AA_SKILLS
 )
 from combatAnalyseOverlay import CombatAnalyseOverlay
 
@@ -437,6 +437,9 @@ class OverlayWindow(QWidget):
         p.drawText(bar_x + bar_w - mw + 10, bar_y + 4, f"Duration: {self.combat_time:.2f}s")
         max_hit_str = f"Biggest hit: {self.max_hit} with {self.max_hit_skill}"; mw = fm.boundingRect(max_hit_str).width()
         p.drawText(bar_x+2, bar_y + BAR_HEIGHT + 28, max_hit_str)
+        p.fillRect(bar_x+10, bar_y + BAR_HEIGHT + 45, bar_w-20, 1, COLORS['line_col'])
+        p.fillRect(bar_x+10, bar_y + BAR_HEIGHT + 103, bar_w-20, 1, COLORS['line_col'])
+        p.fillRect(bar_x+10, bar_y + BAR_HEIGHT + 153, bar_w-20, 1, COLORS['line_col'])
         # max_str = f"Biggest hit: {self.max_hit}"; mw = fm.boundingRect(max_str).width()
         # p.drawText(bar_x + bar_w - mw - 10, bar_y + 4, max_hit_str)
         # skill_str = f"max hitting skill: {self.max_hit_skill}"; sw = fm.boundingRect(skill_str).width()
@@ -586,7 +589,8 @@ class OverlayWindow(QWidget):
         if " with " in before_for:
             enemy_part, skill_part = before_for.split(" with ", 1)
             skill = skill_part.strip().rstrip(".")
-            if "Weapon Attack" in skill:
+            if skill in AA_SKILLS:
+            #if "Weapon Attack" in skill:
                 skill = "Autoattack"
         else:
             enemy_part = before_for
@@ -673,8 +677,7 @@ class OverlayWindow(QWidget):
                 self.combat_time = 0.0
 
             self.update()
-    
-   
+       
     
     def _on_manual_selection(self):
         if self.manual_running or not self.manual_events:
