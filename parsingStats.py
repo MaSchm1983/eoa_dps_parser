@@ -163,6 +163,8 @@ class OverlayWindow(QWidget):
         self.combat_time = 0.0
         self.max_hit = 0
         self.max_hit_skill = '--'
+        self.fight_history = []  # list of dicts
+        self.fight_seq = 0        # laufende ID für Snapshots
         
          # --- Manual-Run State ---
         self.manual_running = False
@@ -181,6 +183,12 @@ class OverlayWindow(QWidget):
         self._ui_timer = QTimer(self)
         self._ui_timer.timeout.connect(self._tick)
         self._ui_timer.start(100)  # smooth time label while running
+        
+        # --- animate feedback bar ---
+        self.hit_pulse = 0.0               # 0..1 Energiewert für den Pulse-Strip
+        self.hit_pulse_decay = 1.5         # bigger ==> faster decay
+        self.recent_hits = []              # für p95-Berechnung (nur Werte, capped)
+        self.recent_hits_cap = 200
         
 
     # ── 1) add a chose mode snippet for damage, heal or damage taken ──
@@ -418,33 +426,58 @@ class OverlayWindow(QWidget):
         p.setBrush(COLORS['frame_bg']); p.setPen(Qt.NoPen)
         p.drawRoundedRect(x0, y0, w0, h0, 5, 5)
         p.setPen(QPen(COLORS['line_col'], 2)); p.drawRect(x0, y0, w0, h0)
-        # bar and stats
+        
+        # ------- kompakte Stats-Zeile -------
         bar_x, bar_y = x0 + BAR_PADDING, y0 + BAR_TOP_OFFSET
         bar_w = w0 - 2 * BAR_PADDING
+
+        p.setFont(FONT_TEXT)
+        fm = p.fontMetrics()
+        p.setPen(COLORS['subtext'])
+
+        left_txt  = f"Total damage: {self.total_damage}"
+        right_txt = f"Duration: {self.combat_time:.2f}s"
+        p.drawText(bar_x, bar_y, left_txt)
+        right_w = fm.boundingRect(right_txt).width()
+        p.drawText(bar_x + bar_w - right_w, bar_y, right_txt)
+
+        # kleiner Abstand
+        y_cursor = bar_y + fm.height() - 6
+
+        # ------- Hit-Pulse-Strip (10px hoch) -------
+        strip_h = 15
+        # Hintergrund
         p.setBrush(COLORS['bar_bg']); p.setPen(Qt.NoPen)
-        p.drawRect(bar_x, bar_y + 10, bar_w, BAR_HEIGHT)
-        bar_fill_map = {
-            'dps': QColor(200, 65, 65, int(0.6*255)),
-            'hps': QColor(65, 200, 65, int(0.6*255)),
-            'dts': QColor(65, 65, 200, int(0.6*255))
-        }
-        p.fillRect(bar_x, bar_y + 10, bar_w, BAR_HEIGHT, bar_fill_map.get(self.stat_mode, COLORS['bar_fill']))
-        
-        p.setFont(FONT_TEXT); p.setPen(COLORS['subtext'])
-        p.drawText(bar_x+1, bar_y + 4, f"Total damage: {self.total_damage}")
-        # p.drawText(bar_x+2, bar_y + BAR_HEIGHT + 28, f"Duration: {self.combat_time:.2f}s")
-        dur_str = f"Duration: {self.combat_time:.2f}s";  mw = fm.boundingRect(dur_str).width()
-        p.drawText(bar_x + bar_w - mw + 10, bar_y + 4, f"Duration: {self.combat_time:.2f}s")
-        max_hit_str = f"Biggest hit: {self.max_hit} with {self.max_hit_skill}"; mw = fm.boundingRect(max_hit_str).width()
-        p.drawText(bar_x+2, bar_y + BAR_HEIGHT + 28, max_hit_str)
-        p.fillRect(bar_x+10, bar_y + BAR_HEIGHT + 45, bar_w-20, 1, COLORS['line_col'])
-        p.fillRect(bar_x+10, bar_y + BAR_HEIGHT + 103, bar_w-20, 1, COLORS['line_col'])
-        p.fillRect(bar_x+10, bar_y + BAR_HEIGHT + 153, bar_w-20, 1, COLORS['line_col'])
-        # max_str = f"Biggest hit: {self.max_hit}"; mw = fm.boundingRect(max_str).width()
-        # p.drawText(bar_x + bar_w - mw - 10, bar_y + 4, max_hit_str)
-        # skill_str = f"max hitting skill: {self.max_hit_skill}"; sw = fm.boundingRect(skill_str).width()
-        # p.drawText(bar_x + bar_w - sw - 10, bar_y + BAR_HEIGHT + 28, skill_str)
-        p.end()
+        p.drawRect(bar_x, y_cursor, bar_w, strip_h)
+
+        # Füllung
+        pulse_col = {
+            'dps': QColor(200, 65, 65, int(0.78*255)),
+            'hps': QColor(65, 200, 65, int(0.78*255)),
+            'dts': QColor(65, 65, 200, int(0.78*255)),
+        }.get(self.stat_mode, COLORS['bar_fill'])
+
+        pulse_w = int(bar_w * max(0.0, min(1.0, self.hit_pulse)))
+        if pulse_w > 0:
+            p.fillRect(bar_x, y_cursor, pulse_w, strip_h, pulse_col)
+            # Glanzkante oben (wirkt „lebendiger“)
+            p.fillRect(bar_x, y_cursor, pulse_w, 3, pulse_col.lighter(145))
+
+        y_cursor += strip_h + 8
+
+        # ------- Biggest-Hit-Zeile -------
+        p.setPen(COLORS['subtext'])
+        big_txt = f"Biggest hit: {self.max_hit} with {self.max_hit_skill}"
+        p.drawText(bar_x, y_cursor + fm.ascent(), big_txt)
+        y_cursor += fm.height() + 15
+
+        # ------- saubere Trenner (unterhalb des Textes) -------
+        p.fillRect(bar_x, y_cursor, bar_w, 1, COLORS['line_col'])
+
+        # ------- saubere Trenner (unterhalb von select target dropdown) -------
+        y_cursor += fm.height() + DROPDOWN_HEIGHT + 10
+        p.fillRect(bar_x, y_cursor, bar_w, 1, COLORS['line_col'])
+        # du kannst hier y_cursor weitergeben/verwenden, wenn unten noch Elemente kommen
 
     ###--- End: initializing functions and update of the overlay ---###
 
@@ -622,8 +655,18 @@ class OverlayWindow(QWidget):
             self.max_hit_skill = skill
         self.combat_time = rel_t
         self.current_enemy = "Total"
+        
+        # --- Pulse aufladen & Recent-Hits pflegen ---
+        self.recent_hits.append(dmg)
+        if len(self.recent_hits) > self.recent_hits_cap:
+            self.recent_hits.pop(0)
 
+        ref = self._dynamic_ref_value()
+        # Anteil des Treffers relativ zur Referenz addieren; leichtes „Overcharge“ erlaubt
+        self.hit_pulse = min(1.5, self.hit_pulse + min(1.0, dmg / ref))
+        
         self.update()    
+        
     
     def _toggle_startstop(self):
         if not self.manual_running:
@@ -649,7 +692,16 @@ class OverlayWindow(QWidget):
             self.manual_combo.clear()
             self.manual_combo.addItem("Total")
             self.manual_combo.blockSignals(False)
-
+            
+            # select combat auf 'current' zurücksetzen
+            self.PST_FGHT_DD.blockSignals(True)
+            self.PST_FGHT_DD.clear()
+            self.PST_FGHT_DD.addItem("current", userData=None)
+            # ggf. frühere Kämpfe wieder anhängen:
+            for it in self.fight_history[-10:][::-1]:  # letzte 10, neuestes oben
+                self.PST_FGHT_DD.addItem(it['label'], userData=it['id'])
+            self.PST_FGHT_DD.blockSignals(False)
+            self.PST_FGHT_DD.currentIndexChanged.connect(self._on_select_combat_changed)
         else:
             # --- STOP ---
             self.manual_running = False
@@ -675,7 +727,33 @@ class OverlayWindow(QWidget):
                 self.combat_time = self.manual_events[-1]['time']
             else:
                 self.combat_time = 0.0
+                    # Snapshot bauen
+            if self.manual_events:
+                start_ts = time.localtime(time.time())
+                ts_label = time.strftime("%Y-%m-%d %H:%M", start_ts)
+                enemies = sorted({e['enemy'] for e in self.manual_events})
+                enemy_label = enemies[0] if len(enemies) == 1 else "Multi"
+                # total = sum(e['dmg'] for e in self.manual_events)
+                # dps = int(total / (dur or 1))
+                # label = f"{ts_label} | {enemy_label} | {total} / {dur:.1f}s (DPS {dps})"
+                label = f"{ts_label} | {enemy_label}"
 
+                snap = {
+                    'id': self.fight_seq,
+                    'label': label,
+                    'events': list(self.manual_events),     # tiefe Kopie genügt hier
+                    'max_hit': self.max_hit,
+                    'max_hit_skill': self.max_hit_skill,
+                    'duration': self.manual_events[-1]['time']
+                }
+                self.fight_seq += 1
+                self.fight_history.append(snap)
+
+                # Dropdown: "current" bleibt Index 0; neuen Eintrag darunter einfügen.
+                self.PST_FGHT_DD.blockSignals(True)
+                self.PST_FGHT_DD.insertItem(1, label, userData=snap['id'])
+                self.PST_FGHT_DD.blockSignals(False)
+                
             self.update()
        
     
@@ -703,13 +781,76 @@ class OverlayWindow(QWidget):
             self.max_hit_skill = '--'
         self.update()
     
+       
+    def _on_select_combat_changed(self, idx: int):
+        txt = self.PST_FGHT_DD.currentText()
+        if txt == "current":
+            # zurück in den Live-Zustand – nichts weiter tun
+            self.update()
+            return
+
+        # ID aus dem ausgewählten Dropdown-Eintrag lesen
+        sel_id = self.PST_FGHT_DD.currentData()
+        # passenden Snapshot finden
+        item = next((it for it in self.fight_history if it['id'] == sel_id), None)
+        if not item:
+            return
+
+        # View aus Snapshot rekonstruieren
+        evts = item['events']
+        self.manual_running = False
+        self.manual_waiting = False
+        self.manual_events = list(evts)
+        self.manual_matrix = [[e['time'], e['dmg'], e['enemy'], e['skill']] for e in evts]
+        self.total_damage = sum(e['dmg'] for e in evts)
+        self.combat_time = item['duration']
+        self.max_hit = item['max_hit']
+        self.max_hit_skill = item['max_hit_skill']
+        self.current_enemy = "Total"
+
+        # Ziel-Dropdown füllen
+        names = sorted({e['enemy'] for e in evts})
+        self.manual_combo.blockSignals(True)
+        self.manual_combo.clear()
+        self.manual_combo.addItem("Total")
+        for n in names:
+            self.manual_combo.addItem(n)
+        self.manual_combo.setCurrentIndex(0)
+        self.manual_combo.blockSignals(False)
+
+        # Pulse-Zustand für die Anzeige neutral setzen
+        # (kein Spark/EMA mehr nötig)
+        if hasattr(self, 'pulse_alpha'):
+            self.pulse_alpha = 0.0
+        if hasattr(self, 'hit_pulse'):
+            self.hit_pulse = 0.0
+        self.recent_hits = [e['dmg'] for e in evts][-getattr(self, 'recent_hits_cap', 200):]
+
+        self.update()
+    
+    
+    
     # --- runtime ticker ---
     def _tick(self):
         # Laufzeit während Kampf
         if self.manual_running and not self.manual_waiting and self.manual_start_time:
-            self.combat_time = time.time() - self.manual_start_time
+            now = time.time()
+            self.combat_time = now - self.manual_start_time
+            # animation bar tick decay
+            dt = 0.1
+            self.hit_pulse = max(0.0, self.hit_pulse * (1.0 - self.hit_pulse_decay * dt))
+
             self.update()
                 
+    # --- dynamic values for bar animation ---
+    def _dynamic_ref_value(self):
+        if self.recent_hits:
+            s = sorted(self.recent_hits)
+            p95 = s[int(0.95 * (len(s)-1))]
+        else:
+            p95 = 0
+        return max(1, p95, 0.5 * (self.max_hit or 0))
+            
             
     def _copy_to_clipboard(self):
         # Ausgabe je nach Auswahl
