@@ -1,4 +1,4 @@
-# EoA_DPS_meter
+# EoA: ParsingStats
 
 ParsingStats is an overlay for [Echoes of Angmar](https://www.echoesofangmar.com/) (vanilla Version of Lord of the Rings online - Shadows of Angmar) that analyse your combat log in real-time and thus track your stats of damaging skills, healing (including power) and damage taken. So far the parser only works for english clients only. Note: **the parsingStats.exe does not access any illegal server stats, it justs load the textfile, where your ingame chat output of the combat chat is logged** 
 
