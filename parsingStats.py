@@ -170,6 +170,9 @@ class OverlayWindow(QWidget):
             'hps': {'events': [], 'total': 0, 'max': 0, 'max_skill': '--', 'recent': []},
             'dts': {'events': [], 'total': 0, 'max': 0, 'max_skill': '--', 'recent': []},
         }
+        for k in ('dps', 'hps', 'dts'):
+            self.modes[k]['pulse'] = 0.0  # per-mode pulse
+        self.pulse_decay = 1.5   
         self.sel_target = None  # aktuelle Auswahl im Target-Dropdown (None = Total)        
         self.total_damage = 0
         self.combat_time = 0.0
@@ -472,7 +475,9 @@ class OverlayWindow(QWidget):
             'dts': QColor(65, 65, 200, int(0.78*255)),
         }.get(self.stat_mode, COLORS['bar_fill'])
 
-        pulse_w = int(bar_w * max(0.0, min(1.0, self.hit_pulse)))
+        pulse = self._agg().get('pulse', 0.0)
+        pulse_w = int(bar_w * max(0.0, min(1.0, pulse)))
+        
         if pulse_w > 0:
             p.fillRect(bar_x, y_cursor, pulse_w, strip_h, pulse_col)
             # Glanzkante oben (wirkt „lebendiger“)
@@ -591,10 +596,14 @@ class OverlayWindow(QWidget):
                                 if DEBUG_PARSE:
                                     print(f"[DMG ] {line.strip()} -> {val} on {target} with {skill}")
                             elif et == 'heal':
-                                _, val, target, skill = parsed
-                                self._on_heal(val, target, skill)
+                                if len(parsed) == 5:
+                                    _, val, target, skill, rtype = parsed
+                                else:
+                                    _, val, target, skill = parsed
+                                    rtype = None
+                                self._on_heal(val, target, skill, rtype)
                                 if DEBUG_PARSE:
-                                    print(f"[HEAL] {line.strip()} -> {val} to {target} (skill={skill})")
+                                    print(f"[HEAL] {line.strip()} -> {val} to {target} (skill={skill}, type={rtype})")
                             elif et == 'taken':
                                 # 5-Tuple ('taken', amount, attacker, skill, dtype) – dtype optional
                                 if len(parsed) == 5:
@@ -670,12 +679,9 @@ class OverlayWindow(QWidget):
 
     def _parse_heal_line(self, line: str):
         """
-        Erkenne Heal-Zeilen. Liefere ("heal", amount:int, target:str, skill:str) oder None.
-        Zählt nur Heals von dir (You) oder deinen Pets.
-        Beispiele:
-        - "You heal yourself for 1,021 Morale points."
-        - "You heal Bori for 450 points."
-        - "The Lynx heals You for 120 points."
+        Liefert:
+        ('heal', amount:int, target:str, skill:str, rtype:str|None)
+        rtype ∈ {'Morale','Power'} wenn vorhanden.
         """
         text = line.strip()
         if not text:
@@ -690,11 +696,13 @@ class OverlayWindow(QWidget):
 
         t = text.rstrip()
 
-        # A) "<actor> heal(s|ed) <target> for N (Morale points|points of Morale|points)"
+        # Hilfs-Teil für Ressource:
+        # … (Morale points) | (Power points) | (points of Morale/Power) | points
+        res_part = r"(?:(?P<res1>Morale|Power)\s+points?|points?\s+of\s+(?P<res2>Morale|Power)|points?)"
+
+        # A) "<actor> heal(s|ed) <target> for N <res_part>"
         m = re.search(
-            r"^(?P<actor>.+?)\s+heal(?:s|ed)?\s+(?P<target>.+?)\s+for\s+(?P<amt>[\d,]+)\s+"
-            r"(?:(?:Morale\s+points?)|(?:points?(?:\s+of\s+Morale)?)|points?)"
-            r"(?:\.\s*)?$",
+            rf"^(?P<actor>.+?)\s+heal(?:s|ed)?\s+(?P<target>.+?)\s+for\s+(?P<amt>[\d,]+)\s+{res_part}(?:\.\s*)?$",
             t, re.IGNORECASE)
         if m:
             actor = strip_the(m.group("actor"))
@@ -705,33 +713,32 @@ class OverlayWindow(QWidget):
                 return None  # nur eigene Heals zählen
 
             target = strip_the(m.group("target"))
-            # normalisiere "yourself" → "You"
             if target.lower() in ("yourself", "you"):
                 target = "You"
 
             amt = to_int(m.group("amt"))
-            skill = "Heal"  # EoA-Zeile enthält keinen Skill
-            return ("heal", amt, target, skill)
+            rtype = (m.group("res1") or m.group("res2"))  # None wenn nur "points"
+            skill = "Heal"
+            return ("heal", amt, target, skill, rtype)
 
-        # B) "<skill> heals <target> for N ..." (falls das in EoA gelegentlich vorkommt)
+        # B) "<skill> heals <target> for N <res_part>"  (nur "Your <skill>" zählt)
         m = re.search(
-            r"^(?P<skill>.+?)\s+heal(?:s|ed)?\s+(?P<target>.+?)\s+for\s+(?P<amt>[\d,]+)\s+"
-            r"(?:(?:Morale\s+points?)|(?:points?(?:\s+of\s+Morale)?)|points?)"
-            r"(?:\.\s*)?$",
+            rf"^(?P<skill>.+?)\s+heal(?:s|ed)?\s+(?P<target>.+?)\s+for\s+(?P<amt>[\d,]+)\s+{res_part}(?:\.\s*)?$",
             t, re.IGNORECASE)
         if m:
-            # Nur zählen, wenn es deine Fähigkeit ist (beginnt mit "Your ")
             skill = m.group("skill").strip()
             if not skill.lower().startswith("your "):
                 return None
             skill = skill[5:].lstrip()
+
             target = strip_the(m.group("target"))
             if target.lower() in ("yourself", "you"):
                 target = "You"
-            amt = to_int(m.group("amt"))
-            return ("heal", amt, target, skill or "Heal")
 
-        # (weitere Varianten wie "is healed", "regains" kannst du später ergänzen)
+            amt = to_int(m.group("amt"))
+            rtype = (m.group("res1") or m.group("res2"))
+            return ("heal", amt, target, skill, rtype)
+
         return None
 
     def _parse_taken_line(self, line: str):
@@ -765,42 +772,6 @@ class OverlayWindow(QWidget):
         # Nur eingehenden Schaden, also Ziel = du; passt durch Regex (… hits you …)
         return ("taken", amt, actor, skill, dtype)
 
-
-    # --- Manual-Hit Verarbeitung ---
-    def _on_hit(self, dmg: int, enemy: str, skill: str):
-        if not self.manual_running:
-            return
-        now = time.time()
-        # Startzeit beim allerersten Treffer setzen
-        if self.manual_waiting:
-            self.manual_waiting = False
-            self.manual_start_time = now            
-
-        rel_t = (now - self.manual_start_time) if self.manual_start_time else 0.0
-
-        evt = {"time": rel_t, "dmg": dmg, "enemy": enemy, "skill": skill}
-        self.manual_events.append(evt)
-        self.manual_matrix.append([rel_t, dmg, enemy, skill])
-
-        # Anzeige aggregieren
-        self.total_damage += dmg
-        if dmg > self.max_hit:
-            self.max_hit = dmg
-            self.max_hit_skill = skill
-        self.combat_time = rel_t
-        self.current_enemy = "Total"
-        
-        # --- Pulse aufladen & Recent-Hits pflegen ---
-        self.recent_hits.append(dmg)
-        if len(self.recent_hits) > self.recent_hits_cap:
-            self.recent_hits.pop(0)
-
-        ref = self._dynamic_ref_value()
-        # Anteil des Treffers relativ zur Referenz addieren; leichtes „Overcharge“ erlaubt
-        self.hit_pulse = min(1.5, self.hit_pulse + min(1.0, dmg / ref))
-        
-        self.update()    
-        
     def _on_hit(self, dmg, enemy, skill):
         if not self.manual_running: return
         now = time.time()
@@ -814,16 +785,30 @@ class OverlayWindow(QWidget):
         # Anzeige auf **aktuellen** Modus mappen
         self._refresh_view_from_mode()
 
-    def _on_heal(self, amount, target, skill):
-        if not self.manual_running: return
+    def _on_heal(self, amount: int, target: str, skill: str, rtype: str | None):
+        if not self.manual_running:
+            return
         now = time.time()
         if self.manual_waiting:
-            self.manual_waiting = False; self.manual_start_time = now
+            self.manual_waiting = False
+            self.manual_start_time = now
+
         rel_t = (now - self.manual_start_time) if self.manual_start_time else 0.0
-        evt = {"time": rel_t, "dmg": amount, "enemy": target, "skill": skill}
-        self._append_evt('hps', evt)
-        ref = self._dynamic_ref_value(); self.hit_pulse = min(1.5, self.hit_pulse + min(1.0, amount/max(1,ref)))
-        self._refresh_view_from_mode()
+
+        evt = {
+            "time": rel_t,
+            "dmg": amount,
+            "enemy": target,
+            "skill": skill,
+            "rtype": rtype or "Morale"   # <-- Default setzen
+        }
+        if rtype:
+            evt["rtype"] = rtype  # 'Morale' oder 'Power'
+            self._append_evt('hps', evt)
+            ref = self._dynamic_ref_value()
+            self.hit_pulse = min(1.5, getattr(self, "hit_pulse", 0.0) + min(1.0, amount / max(1, ref)))
+            self._refresh_view_from_mode()
+            return
 
     def _on_taken(self, amount, attacker, skill, dtype):
         if not self.manual_running: return
@@ -919,14 +904,7 @@ class OverlayWindow(QWidget):
             self._stop_log_thread()
 
             # Dropdown mit Zielen füllen
-            names = sorted({e['enemy'] for e in self.manual_events})
-            self.manual_combo.blockSignals(True)
-            self.manual_combo.clear()
-            self.manual_combo.addItem("Total")
-            for n in names:
-                self.manual_combo.addItem(n)
-            self.manual_combo.setCurrentIndex(0)
-            self.manual_combo.blockSignals(False)
+            self._rebuild_target_dropdown()
 
             # Combat-Time finalisieren (unverändert okay)
             if hasattr(self, 'modes'):
@@ -1055,8 +1033,10 @@ class OverlayWindow(QWidget):
             self.combat_time = now - self.manual_start_time
             # animation bar tick decay
             dt = 0.1
-            self.hit_pulse = max(0.0, self.hit_pulse * (1.0 - self.hit_pulse_decay * dt))
-
+            #self.hit_pulse = max(0.0, self.hit_pulse * (1.0 - self.hit_pulse_decay * dt))
+            for k in ('dps', 'hps', 'dts'):
+                a = self.modes[k]
+                a['pulse'] = max(0.0, a.get('pulse', 0.0) * (1.0 - self.pulse_decay * dt))
             self.update()
                 
     # --- dynamic values for bar animation ---
@@ -1070,23 +1050,78 @@ class OverlayWindow(QWidget):
             
             
     def _copy_to_clipboard(self):
-        evts = self._agg()['events']
-        if self.sel_target:
-            evts = [e for e in evts if e['enemy'] == self.sel_target]
-        total = sum(e['dmg'] for e in evts)
-        duration = (evts[-1]['time'] - evts[0]['time']) if self.sel_target and len(evts)>1 else (evts[-1]['time'] if evts else 0.0)
-        rate = int(total / (duration or 1))
-        sel = self.sel_target
+        # ---- Events je nach Code-Stand holen ----
+        if hasattr(self, "modes"):  # neuer Multi-Mode-Stand
+            evts = list(self._agg()['events'])
+            sel = getattr(self, "sel_target", None)
+            if sel:
+                evts = [e for e in evts if e['enemy'] == sel]
+            target_total_label = ("all allies" if self.stat_mode == 'hps'
+                                else "all sources" if self.stat_mode == 'dts'
+                                else "all targets")
+            selected_label = sel or target_total_label
+            # Dauer
+            if not evts:
+                duration = 0.0
+            else:
+                duration = (evts[-1]['time'] - evts[0]['time']) if sel and len(evts) > 1 else evts[-1]['time']
+        else:  # älterer Stand (single stream + ComboBox)
+            sel_txt = self.manual_combo.currentText()
+            evts = list(self.manual_events) if sel_txt == "Total" else [e for e in self.manual_events if e['enemy'] == sel_txt]
+            selected_label = ("all allies" if self.stat_mode == 'hps'
+                            else "all sources" if self.stat_mode == 'dts'
+                            else "all targets") if sel_txt == "Total" else sel_txt
+            if not evts:
+                duration = 0.0
+            else:
+                duration = (evts[-1]['time'] - evts[0]['time']) if sel_txt != "Total" and len(evts) > 1 else evts[-1]['time']
 
+        total = sum(e['dmg'] for e in evts)
+        rate  = int(total / (duration or 1))
+
+        # ---- Nachricht pro Modus ----
         if self.stat_mode == 'hps':
-            tgt = "all allies" if not sel else sel
-            msg = f"You healed {tgt} for {total} Morale over {duration:.1f}s (HPS: {rate})"
+            # Basistext
+            base_target = selected_label if 'selected_label' in locals() else (
+                ("all allies" if self.manual_combo.currentText() == "Total" else self.manual_combo.currentText())
+            )
+            # Breakdown nach Ressource
+            type_totals = {}
+            for e in evts:
+                rt = e.get('rtype') or "Morale"  # default Morale, falls nicht geloggt
+                type_totals[rt] = type_totals.get(rt, 0) + e['dmg']
+
+            parts = []
+            for rt, amt in sorted(type_totals.items(), key=lambda kv: kv[1], reverse=True):
+                pct = (100.0 * amt / total) if total else 0.0
+                parts.append(f"{rt} {amt} ({pct:.0f}%)")
+            breakdown = f" | by resource: {', '.join(parts)}" if parts else ""
+
+            # Self-Heal phrasing
+            if isinstance(base_target, str) and base_target in ("You", "yourself"):
+                msg = f"You healed yourself for {total} over {duration:.1f}s (HPS: {rate}){breakdown}"
+            else:
+                msg = f"You healed {base_target} for {total} over {duration:.1f}s (HPS: {rate}){breakdown}"
+
         elif self.stat_mode == 'dts':
-            src = "all sources" if not sel else sel
-            msg = f"You took {total} damage over {duration:.1f}s from {src} (DTPS: {rate})"
-        else:
-            tgt = "all targets" if not sel else sel
-            msg = f"You dealt {total} damage over {duration:.1f}s to {tgt} (DPS: {rate})"
+            # Breakdown nach dtype
+            type_totals = {}
+            for e in evts:
+                dt = e.get('dtype') or "Unknown"
+                type_totals[dt] = type_totals.get(dt, 0) + e['dmg']
+
+            # sortiert nach Menge absteigend
+            parts = []
+            for dt, amt in sorted(type_totals.items(), key=lambda kv: kv[1], reverse=True):
+                pct = (100.0 * amt / total) if total else 0.0
+                parts.append(f"{dt} {amt} ({pct:.0f}%)")
+
+            breakdown = f" | by type: {', '.join(parts)}" if parts else ""
+            msg = f"You took {total} damage over {duration:.1f}s from {selected_label} (DTPS: {rate}){breakdown}"
+
+        else:  # 'dps'
+            msg = f"You dealt {total} damage over {duration:.1f}s to {selected_label} (DPS: {rate})"
+
         QApplication.clipboard().setText(msg)
             
     def get_manual_matrix(self):
@@ -1140,10 +1175,20 @@ class OverlayWindow(QWidget):
         if evt['dmg'] > agg['max']:
             agg['max'] = evt['dmg']
             agg['max_skill'] = evt.get('max_skill_override', evt['skill'])
-        # Recent für Pulse
+        # Recent für Referenz
         agg['recent'].append(evt['dmg'])
         if len(agg['recent']) > self.recent_hits_cap:
             agg['recent'].pop(0)
+        # NEU: Pulse nur für DIESEN Modus
+        ref = self._ref_value(mode)
+        agg['pulse'] = min(1.5, agg['pulse'] + min(1.0, evt['dmg'] / max(1, ref)))
+
+    def _ref_value(self, mode=None):
+        agg = self._agg(mode)
+        s = sorted(agg['recent'])
+        p95 = s[int(0.95 * (len(s)-1))] if s else 0
+        return max(1, p95, 0.5 * (agg['max'] or 0))
+
 
     def _reset_all_modes(self):
         if hasattr(self, "modes"):
