@@ -31,15 +31,12 @@ from PyQt5.QtGui import QColor, QPainter, QPen
 from config import (
     WINDOW_WIDTH, MIN_HEIGHT, MAX_HEIGHT,
     TITLE_BAR_HEIGHT, BUTTON_SIZE,
-    FRAME_PADDING, DROPDOWN_HEIGHT, DROPDOWN_OFFSET, HIST_COM_DD_HEIGHT,
+    FRAME_PADDING, DROPDOWN_HEIGHT,
     MODE_AREA_HEIGHT, MODE_BTN_HEIGHT, MODE_BTN_WIDTH,
-    BAR_HEIGHT, BAR_PADDING, BAR_TOP_OFFSET, 
-    STAT_FRAME_HEIGHT, STARTSTOP_BTN_WIDTH, STARTSTOP_BTN_HEIGHT, 
+    BAR_PADDING, STARTSTOP_BTN_WIDTH, STARTSTOP_BTN_HEIGHT, 
     FONT_TITLE, FONT_SUBTITLE, FONT_BTN_TEXT,
     FONT_TEXT, FONT_TEXT_CLS_BTN, COLORS, AA_SKILLS
 )
-from combatAnalyseOverlay import CombatAnalyseOverlay
-
 
 ###############################################################################
 ##################### Parse for config.ini for infos ##########################
@@ -76,10 +73,41 @@ DEBUG_PARSE = config.getboolean('Settings', 'DEBUG_PARSE', fallback=False)
 
 # ── Helper to read current combat log (will be updated every 5s later) ── 
 
+def _clean_dir(p: str) -> str:
+    # Quotes + Leerraum weg, Variablen expandieren, normalisieren
+    p = (p or "").strip().strip('"').strip("'")
+    p = os.path.expandvars(os.path.expanduser(p))
+    return os.path.normpath(p)
+
 def get_latest_combat_log(folder=COMBAT_LOG_FOLDER):
-    pattern = os.path.join(folder, "Combat_*.txt")
-    files = glob.glob(pattern)
+    base = _clean_dir(folder)
+    if not base or not os.path.isdir(base):
+        if DEBUG_PARSE:
+            print(f"[LOG] Invalid log dir: {repr(folder)} -> {repr(base)} (exists={os.path.isdir(base)})")
+        return None
+
+    # mehrere übliche Muster erlauben
+    patterns = [
+        os.path.join(base, "Combat_*.txt"),
+        os.path.join(base, "CombatLog_*.txt"),
+        os.path.join(base, "combat_*.txt"),
+    ]
+    files = []
+    for pat in patterns:
+        hit = glob.glob(pat)
+        if DEBUG_PARSE:
+            print(f"[LOG] glob {pat} -> {len(hit)}")
+        files.extend(hit)
+
     return max(files, key=os.path.getmtime) if files else None
+
+def _detect_encoding(path: str) -> str:
+    with open(path, 'rb') as fb:
+        head = fb.read(4)
+    if head.startswith(b'\xff\xfe'): return 'utf-16-le'
+    if head.startswith(b'\xfe\xff'): return 'utf-16-be'
+    if head.startswith(b'\xef\xbb\xbf'): return 'utf-8-sig'
+    return 'utf-8'
 
 
 ###############################################################################
@@ -148,6 +176,9 @@ class OverlayWindow(QWidget):
         self._create_widgets()            # 4) create all widgets on the overlay
         
         self._update_layout()             # 5) update layout on interact function
+        self.show()   # optional, das show im Main-Window funktioniert aber auch
+        self.raise_()
+        self.activateWindow()
 
 
     # ── 2) init window size and attributes on startup ──
@@ -166,13 +197,11 @@ class OverlayWindow(QWidget):
         self.track_mode = 'manual'
         self.current_enemy = '--'
         self.modes = {
-            'dps': {'events': [], 'total': 0, 'max': 0, 'max_skill': '--', 'recent': []},
-            'hps': {'events': [], 'total': 0, 'max': 0, 'max_skill': '--', 'recent': []},
-            'dts': {'events': [], 'total': 0, 'max': 0, 'max_skill': '--', 'recent': []},
+            'dps': {'events': [], 'total': 0, 'max': 0, 'max_skill': '--'},
+            'hps': {'events': [], 'total': 0, 'max': 0, 'max_skill': '--'},
+            'dts': {'events': [], 'total': 0, 'max': 0, 'max_skill': '--'},
         }
-        for k in ('dps', 'hps', 'dts'):
-            self.modes[k]['pulse'] = 0.0  # per-mode pulse
-        self.pulse_decay = 1.5   
+        
         self.sel_target = None  # aktuelle Auswahl im Target-Dropdown (None = Total)        
         self.total_damage = 0
         self.combat_time = 0.0
@@ -199,12 +228,12 @@ class OverlayWindow(QWidget):
         self._ui_timer.timeout.connect(self._tick)
         self._ui_timer.start(100)  # smooth time label while running
         
-        # --- animate feedback bar ---
-        self.hit_pulse = 0.0               # 0..1 Energiewert für den Pulse-Strip
-        self.hit_pulse_decay = 1.5         # bigger ==> faster decay
-        self.recent_hits = []              # für p95-Berechnung (nur Werte, capped)
-        self.recent_hits_cap = 200
-        
+        # Position des Target-Headers (All targets / DPS / 19.0s)
+        self._info_bar_y = TITLE_BAR_HEIGHT + MODE_BTN_HEIGHT + 8
+        self._table_top_y = TITLE_BAR_HEIGHT + 80
+        # Scroll-Offset für Skill-Tabelle
+        self._table_scroll = 0.0
+              
 
     # ── 1) add a chose mode snippet for damage, heal or damage taken ──
     def _create_stat_mode_buttons(self):
@@ -255,7 +284,7 @@ class OverlayWindow(QWidget):
         self.close_btn.setFont(FONT_TEXT_CLS_BTN)
         self.close_btn.setFixedSize(BUTTON_SIZE, BUTTON_SIZE)
         self.close_btn.clicked.connect(self.close)
-        apply_style(self.close_btn, bg=QColor(0,0,0,0), text_color=rgba(COLORS['line_col']))
+        apply_style(self.close_btn, bg=QColor(0,0,0,70), text_color=rgba(COLORS['background']))
 
 
         # ── past fights selection dropdown ──
@@ -266,8 +295,7 @@ class OverlayWindow(QWidget):
         self.PST_FGHT_DD = QComboBox(self)
         self.PST_FGHT_DD.setFont(FONT_TEXT)
         self.PST_FGHT_DD.setFixedHeight(DROPDOWN_HEIGHT)
-        self.PST_FGHT_DD.setStyleSheet("QComboBox{background:rgba(100,100,100,125);color:white;}")
-        self.PST_FGHT_DD.addItem("current")
+        self.PST_FGHT_DD.addItem("Select combat")
 
         # ── start/stop button for manual parsing mode ──
         self.start_stop_btn = QPushButton("Start", self)
@@ -280,9 +308,7 @@ class OverlayWindow(QWidget):
         self.manual_combo = QComboBox(self)
         self.manual_combo.setFont(FONT_TEXT)
         self.manual_combo.setFixedHeight(DROPDOWN_HEIGHT)
-        #self.manual_combo.setFixedWidth(150)
-        self.manual_combo.setStyleSheet("QComboBox{background:rgba(100,100,100,125);color:white;}")
-        self.manual_combo.addItem("Total")
+        self.manual_combo.addItem("All targets")
         self.manual_combo.currentIndexChanged.connect(self._on_manual_selection)
 
         self.manual_label = QLabel("Select target:", self)
@@ -294,23 +320,39 @@ class OverlayWindow(QWidget):
         self.manual_label.hide()
         
         
-        self.analyse_btn = QPushButton("Analyse combat", self)
-        self.analyse_btn.setFont(FONT_BTN_TEXT)
-        # Height same as start/stop
-        self.analyse_btn.setFixedHeight(STARTSTOP_BTN_HEIGHT)
-        # Will set width in layout
-        # Use DPS color as default, and lighter as hover (update as needed for other modes)
-        btn_color = COLORS['MODE_BTN_BG_DPS']
-        apply_style(
-            self.analyse_btn,
-            bg=btn_color,
-            text_color="white",
-            hover=btn_color.lighter(120),
-            radius=8,
-            border_w=1,
-            bold=True
-        )
-        self.analyse_btn.clicked.connect(self.open_analysis_overlay)
+        # ── gemeinsamer LotRO-Style für beide Dropdowns ──
+        common_dd_style = """
+        QComboBox {
+            background-color: rgba(0, 0, 0, 190);
+            color: #f2e3a0;
+            border: 1px solid #6b5b35;
+            padding: 2px 24px 2px 6px;
+            font-family: "Arial";
+            font-size: 10pt;
+        }
+        QComboBox::drop-down {
+            border: none;
+            width: 18px;
+        }
+        QComboBox::down-arrow {
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 7px solid #f2e3a0;   /* gleiche Farbe wie Text */
+            margin-right: 4px;
+        }
+        QComboBox QAbstractItemView {
+            background-color: rgba(0, 0, 0, 230);
+            color: #f2e3a0;
+            selection-background-color: rgba(255, 255, 255, 40);
+            selection-color: #ffffff;
+        }
+        """
+
+        self.PST_FGHT_DD.setStyleSheet(common_dd_style)
+        self.manual_combo.setStyleSheet(common_dd_style)
+        
         
         
         self.auto_stop_cb = QCheckBox("stop combat after 15s", self)
@@ -338,167 +380,311 @@ class OverlayWindow(QWidget):
 
     # ── 5) styling updated for layout and update on interaction/events ──
     def _update_layout(self):
-        # ── Add window height for manual mode extension (start/stop button and dropdown) ──
-        new_h = MIN_HEIGHT
-        self.resize(self.width(), new_h)
-        
-        # ── close button ──
-        self.close_btn.move(self.width() - BUTTON_SIZE - FRAME_PADDING, FRAME_PADDING)
-        
-        # ── stat mode buttons to switch between damage, heal or damage taken parsing ──
+        # Höhe im Rahmen halten
+        new_h = max(MIN_HEIGHT, min(self.height(), MAX_HEIGHT))
+        self.resize(WINDOW_WIDTH, new_h)
+
+        # ── Close-Button ──
+        self.close_btn.move(self.width() - BUTTON_SIZE - FRAME_PADDING,
+                            FRAME_PADDING)
+
+        # ── Mode-Buttons (Damage / Heal / Taken) direkt unter Titel ──
         mode_btns = list(self.stat_mode_btns.values())
-        gap = 8
-        MODE_BTN_W = mode_btns[0].width()
-        total_w = len(mode_btns) * MODE_BTN_W + (len(mode_btns) - 1) * gap
+        gap = 6
+        btn_w = mode_btns[0].width()
+        total_w = len(mode_btns) * btn_w + (len(mode_btns) - 1) * gap
         start_x = (self.width() - total_w) // 2
-        y_mode = TITLE_BAR_HEIGHT + 18  # More space below title bar
+        y = TITLE_BAR_HEIGHT + 10
+
         for i, btn in enumerate(mode_btns):
-            btn.move(start_x + i * (MODE_BTN_W + gap), y_mode)
+            btn.move(start_x + i * (btn_w + gap), y)
             btn.show()
 
-        # ── past fights dropdown ──
-        ext_y = y_mode + MODE_AREA_HEIGHT + FRAME_PADDING
-        self.label.move(FRAME_PADDING, ext_y + 5)
-        dd_x = FRAME_PADDING + self.label.width() + DROPDOWN_OFFSET
-        dd_w = self.width() - dd_x - FRAME_PADDING
-        self.PST_FGHT_DD.setGeometry(dd_x, ext_y, dd_w, DROPDOWN_HEIGHT)
+        y += MODE_BTN_HEIGHT + 14
 
-        # ── calculate DPS frame origin and height ──
-        self._frame_y = ext_y + DROPDOWN_HEIGHT + DROPDOWN_OFFSET
-        
-        # ── target selection dropdown aligned right with same padding as start/stop's left ──
+        # ── Info-Bar ("All targets  |  DPS | 19.0s") direkt unter den Buttons ──
+        info_h = 24
+        self._info_bar_y = y          # wird in paintEvent verwendet
+        y += info_h + 10               # etwas Abstand zu den Combos
+
+        # Gemeinsame Breite / X-Position für beide Dropdowns
+        dd_x = FRAME_PADDING + BAR_PADDING
+        dd_w = self.width() - 2 * (FRAME_PADDING + BAR_PADDING)
+
+        # ── Select combat (Label verstecken, Combo über volle Breite) ──
+        self.label.hide()
+        self.PST_FGHT_DD.setGeometry(dd_x, y, dd_w, DROPDOWN_HEIGHT)
+
+        y += DROPDOWN_HEIGHT + 6
+
+        # ── Select target / ally / source (Label verstecken, volle Breite) ──
+        self.manual_label.hide()
         self.manual_combo.show()
-        self.manual_label.show()
-        mc_x = FRAME_PADDING + BAR_PADDING + self.manual_label.width() + DROPDOWN_OFFSET
-        mc_y = self._frame_y + 120
-        mc_w = self.width() - mc_x - FRAME_PADDING - BAR_PADDING
-        self.manual_combo.move(mc_x, mc_y)
-        self.manual_combo.setGeometry(mc_x, mc_y, mc_w, DROPDOWN_HEIGHT)        
-        # ── label left of the dropdown ──
-        ml_x = mc_x - self.manual_label.width() - DROPDOWN_OFFSET
-        self.manual_label.move(ml_x, mc_y+5)
-        
-        
-        # ── analyze button ──
-        bar_x = FRAME_PADDING + BAR_PADDING
-        bar_w = self.width() - 2 * (FRAME_PADDING + BAR_PADDING)
-        # Position analyse button below manual_combo
-        analyse_y = mc_y + DROPDOWN_HEIGHT + 25  # 18px gap under target dropdown
-        self.analyse_btn.setFixedWidth(bar_w)
-        self.analyse_btn.move(bar_x, analyse_y)
-        self.analyse_btn.show()
-                
-        # ── start/stop button and auto stop checkbox ──
-        self.start_stop_btn.show()
-        ss_x = FRAME_PADDING + BAR_PADDING
-        ss_y = self._frame_y + STAT_FRAME_HEIGHT - FRAME_PADDING - BAR_PADDING
-        self.start_stop_btn.move(ss_x, ss_y)
-        
-        cb_x = ss_x + self.start_stop_btn.width() + 18  # some gap to right
-        cb_y = ss_y + (self.start_stop_btn.height() - self.auto_stop_cb.sizeHint().height()) // 2  # vertical align
+        self.manual_combo.setGeometry(dd_x, y, dd_w, DROPDOWN_HEIGHT)
+
+        # Startpunkt der Skill-Tabelle
+        self._table_top_y = y + DROPDOWN_HEIGHT + 8
+
+        # ── Untere Button-Leiste (Start/Stop, Auto-Stop, Copy) ──
+        bottom_y = self.height() - STARTSTOP_BTN_HEIGHT - FRAME_PADDING
+
+        self.start_stop_btn.move(FRAME_PADDING, bottom_y)
+
+        cb_x = self.start_stop_btn.x() + self.start_stop_btn.width() + 12
+        cb_y = bottom_y + (STARTSTOP_BTN_HEIGHT - self.auto_stop_cb.sizeHint().height()) // 2
         self.auto_stop_cb.move(cb_x, cb_y)
-        self.auto_stop_cb.show()
-                
-        # ── position copy button: left padding, centered vertically in leftover space ──
+
         copy_x = self.width() - self.copy_btn.width() - FRAME_PADDING
-        copy_y = MAX_HEIGHT - STARTSTOP_BTN_HEIGHT - 2*FRAME_PADDING
+        copy_y = bottom_y + (STARTSTOP_BTN_HEIGHT - self.copy_btn.height()) // 2
         self.copy_btn.move(copy_x, copy_y)
+
         self.update()
 
     # ── paint all colors, texts, bars etc ──
     def paintEvent(self, e):
+        from PyQt5.QtGui import QFont, QColor, QPainter
+        from PyQt5.QtCore import Qt, QRect
+
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        # ── paint background w.r.t. the chosen mode ──
-        bg_map = {
-            'dps': COLORS['background_dps'],
-            'hps': COLORS['background_hps'],
-            'dts': COLORS['background_dts']
-        }
-        title_map = {
-            'dps': COLORS['title_bar_dps'],
-            'hps': COLORS['title_bar_hps'],
-            'dts': COLORS['title_bar_dts']
-        }
-        p.fillRect(self.rect(), bg_map.get(self.stat_mode, COLORS['background']))
-        # ── recolor title bar w.r.t. the chosen mode and draw left-aligned, vertically centered title ──
-        p.fillRect(0, 0, self.width(), TITLE_BAR_HEIGHT, title_map.get(self.stat_mode, COLORS['title_bar']))
-        p.setPen(COLORS['line_col'])
+
+        # ---------- halbtransparenter Hintergrund ----------
+        p.fillRect(self.rect(), QColor(0, 0, 0, int(0.5 * 255)))
+
+        # ---------- gemeinsame Header-Farben (LotRO-Stil) ----------
+        header_bg     = QColor(60, 40, 20, int(0.95 * 255))   # dunkles Braun
+        header_border = QColor(180, 140, 60, 255)             # Gold/Kante
+        header_text   = QColor(235, 220, 190, 255)            # helles Beige
+
+        # ---------- Titelbar ----------
+        p.fillRect(0, 0, self.width(), TITLE_BAR_HEIGHT, header_bg)
+        p.setPen(header_border)
+        p.drawLine(0, TITLE_BAR_HEIGHT - 1, self.width(), TITLE_BAR_HEIGHT - 1)
+
+        p.setPen(header_text)
         p.setFont(FONT_TITLE)
         fm = p.fontMetrics()
-        ty = (TITLE_BAR_HEIGHT + fm.ascent() - fm.descent())  // 2
+        ty = (TITLE_BAR_HEIGHT + fm.ascent() - fm.descent()) // 2
         p.drawText(FRAME_PADDING, ty, "ParsingStats in EoA v1.0.0")
-        # ── paint line beneath titelbar
-        sep_y = TITLE_BAR_HEIGHT + MODE_AREA_HEIGHT + 2*FRAME_PADDING
-        p.fillRect(0, sep_y - 2, self.width(), 2, COLORS['line_col'])
-        sep_y = TITLE_BAR_HEIGHT + 18 + MODE_AREA_HEIGHT + HIST_COM_DD_HEIGHT + DROPDOWN_OFFSET+ FRAME_PADDING
-        p.fillRect(0, sep_y - 2, self.width(), 2, COLORS['line_col'])
-        # ── draw DPS frame and content ──
-        # frame
-        x0, y0 = FRAME_PADDING, self._frame_y + 20
-        w0 = self.width() - 2 * FRAME_PADDING
-        h0 = STAT_FRAME_HEIGHT
-        p.setBrush(COLORS['frame_bg']); p.setPen(Qt.NoPen)
-        p.drawRoundedRect(x0, y0, w0, h0, 5, 5)
-        p.setPen(QPen(COLORS['line_col'], 2)); p.drawRect(x0, y0, w0, h0)
-        
-        # ------- kompakte Stats-Zeile -------
-        bar_x, bar_y = x0 + BAR_PADDING, y0 + BAR_TOP_OFFSET
-        bar_w = w0 - 2 * BAR_PADDING
 
-        p.setFont(FONT_TEXT)
-        fm = p.fontMetrics()
-        p.setPen(COLORS['subtext'])
-        
-        # oben:
-        metric_name = "healing" if self.stat_mode == 'hps' else ("damage taken" if self.stat_mode == 'dts' else "damage")
-        
-        left_txt  =  f"Total {metric_name}: {self.total_damage}"
-        right_txt = f"Duration: {self.combat_time:.2f}s"
-        p.drawText(bar_x, bar_y, left_txt)
-        right_w = fm.boundingRect(right_txt).width()
-        p.drawText(bar_x + bar_w - right_w, bar_y, right_txt)
+        # ---------- Info-Bar ("All targets   DPS | 19.0s") ----------
+        header_h = 24
+        margin_l = 16
+        margin_r = 16  # Platz für Close-Button
 
-        # kleiner Abstand
-        y_cursor = bar_y + fm.height() - 6
+        header_y = getattr(
+            self,
+            "_info_bar_y",
+            TITLE_BAR_HEIGHT + MODE_BTN_HEIGHT + 8
+        )
 
-        # ------- Hit-Pulse-Strip (10px hoch) -------
-        strip_h = 15
-        # Hintergrund
-        p.setBrush(COLORS['bar_bg']); p.setPen(Qt.NoPen)
-        p.drawRect(bar_x, y_cursor, bar_w, strip_h)
+        info_rect = QRect(
+            margin_l,
+            header_y,
+            self.width() - margin_l - margin_r,
+            header_h
+        )
 
-        # Füllung
-        pulse_col = {
-            'dps': QColor(200, 65, 65, int(0.78*255)),
-            'hps': QColor(65, 200, 65, int(0.78*255)),
-            'dts': QColor(65, 65, 200, int(0.78*255)),
-        }.get(self.stat_mode, COLORS['bar_fill'])
+        p.setBrush(header_bg)
+        p.setPen(header_border)
+        p.drawRect(info_rect)
 
-        pulse = self._agg().get('pulse', 0.0)
-        pulse_w = int(bar_w * max(0.0, min(1.0, pulse)))
-        
-        if pulse_w > 0:
-            p.fillRect(bar_x, y_cursor, pulse_w, strip_h, pulse_col)
-            # Glanzkante oben (wirkt „lebendiger“)
-            p.fillRect(bar_x, y_cursor, pulse_w, 3, pulse_col.lighter(145))
+        title = self._current_target_label()
+        p.setFont(QFont("Arial", 10, QFont.Bold))
+        p.setPen(header_text)
+        p.drawText(
+            info_rect.adjusted(8, 0, -8, 0),
+            Qt.AlignVCenter | Qt.AlignLeft,
+            title
+        )
 
-        y_cursor += strip_h + 8
+        mode_txt = self.stat_mode.upper()
+        info_txt = f"{mode_txt} | {self.combat_time:.1f}s"
+        p.setFont(QFont("Arial", 9))
+        p.drawText(
+            info_rect.adjusted(8, 0, -8, 0),
+            Qt.AlignVCenter | Qt.AlignRight,
+            info_txt
+        )
 
-        # ------- Biggest-Hit-Zeile -------
-        p.setPen(COLORS['subtext'])
-        big_label = "Biggest heal" if self.stat_mode == 'hps' else ("Biggest hit taken" if self.stat_mode == 'dts' else "Biggest hit")
-        max_hit_str = f"{big_label}: {self.max_hit} with {self.max_hit_skill}"
-        p.drawText(bar_x, y_cursor + fm.ascent(), max_hit_str)
-        y_cursor += fm.height() + 15
+        # ---------- Skill-Tabelle + Summary ----------
 
-        # ------- saubere Trenner (unterhalb des Textes) -------
-        p.fillRect(bar_x, y_cursor, bar_w, 1, COLORS['line_col'])
+        table_top = self._table_top_y
+        left = 14
+        right = self.width() - 14
+        row_h = 22
 
-        # ------- saubere Trenner (unterhalb von select target dropdown) -------
-        y_cursor += fm.height() + DROPDOWN_HEIGHT + 10
-        p.fillRect(bar_x, y_cursor, bar_w, 1, COLORS['line_col'])
-        # du kannst hier y_cursor weitergeben/verwenden, wenn unten noch Elemente kommen
+        col_hits_w = 40
+        col_total_w = 70
+        col_avg_w = 70
+        spacing = 10
+
+        col_avg_x = right - col_avg_w
+        col_total_x = col_avg_x - spacing - col_total_w
+        col_hits_x = col_total_x - spacing - col_hits_w
+        bar_left = left
+        bar_right = col_hits_x - spacing
+        bar_max_w = max(40, bar_right - bar_left)
+
+        # Bereich für Tabelle / Summary nach unten begrenzen
+        bottom_y = self.height() - STARTSTOP_BTN_HEIGHT - FRAME_PADDING
+        summary_block_h = row_h + 8           # Platz für Linie + Summary-Zeile
+        body_top = table_top + 2 * row_h - 5     # nach Headerzeile
+        body_bottom = bottom_y - summary_block_h - 4
+
+        # --- Header über der Tabelle ---
+        header_y2 = table_top + row_h
+        p.setFont(QFont("Arial", 10, QFont.Bold))
+        p.setPen(QColor(200, 200, 200, 210))
+
+        skills_header_rect = QRect(bar_left, header_y2 - row_h + 4,
+                                bar_max_w, row_h)
+        p.drawText(skills_header_rect,
+                Qt.AlignVCenter | Qt.AlignLeft,
+                "Skills")
+
+        hits_header_rect = QRect(col_hits_x, header_y2 - row_h + 4,
+                                col_hits_w, row_h)
+        total_header_rect = QRect(col_total_x, header_y2 - row_h + 4,
+                                col_total_w, row_h)
+        avg_header_rect = QRect(col_avg_x, header_y2 - row_h + 4,
+                                col_avg_w, row_h)
+
+        p.drawText(hits_header_rect, Qt.AlignCenter, "Hits")
+        p.drawText(total_header_rect, Qt.AlignCenter, "Total")
+        p.drawText(avg_header_rect, Qt.AlignCenter, "Avg")
+
+        p.setPen(header_border)
+        p.drawLine(bar_left, header_y2 + 2, right, header_y2 + 2)
+
+        stats = self._build_skill_stats()
+        if not stats:
+            p.setFont(QFont("Arial", 9))
+            p.setPen(QColor(220, 220, 220))
+            p.drawText(bar_left, body_top + 8,
+                    "No data for this combat / mode yet.")
+            p.end()
+            return
+
+        max_val = max(s['total'] for s in stats) or 1
+
+        # Farben für Bars je nach Modus
+        if self.stat_mode == 'dps':
+            bar_base_col = QColor(150, 40, 40, 230)
+            bar_highlight_col = QColor(210, 80, 80, 255)
+        elif self.stat_mode == 'hps':
+            bar_base_col = QColor(40, 130, 40, 230)
+            bar_highlight_col = QColor(90, 200, 90, 255)
+        else:
+            bar_base_col = QColor(40, 40, 130, 230)
+            bar_highlight_col = QColor(90, 90, 200, 255)
+
+        # --- Gesamt-Summary über alle Skills vorberechnen ---
+        total_hits_sum = sum(s['hits'] for s in stats)
+        total_val_sum = sum(s['total'] for s in stats)
+        overall_avg = (total_val_sum / total_hits_sum) if total_hits_sum else 0.0
+
+        # --- Scroll-Grenzen berechnen ---
+        visible_h = max(1, body_bottom - body_top)
+        content_h = len(stats) * row_h
+        max_scroll = max(0, content_h - visible_h)
+        self._table_scroll = max(0.0, min(self._table_scroll, float(max_scroll)))
+
+        # Startindex der ersten sichtbaren Zeile
+        start_index = int(self._table_scroll // row_h) if max_scroll > 0 else 0
+        offset_y = -(self._table_scroll % row_h) if max_scroll > 0 else 0.0
+
+        # --- Zeilen zeichnen ---
+        p.setFont(QFont("Arial", 9))
+        y = body_top + offset_y
+
+        for i in range(start_index, len(stats)):
+            s = stats[i]
+            if y >= body_bottom:
+                break
+
+            skill = s['skill']
+            hits = s['hits']
+            total_val = s['total']
+            avg = s['avg']
+
+            frac = total_val / max_val
+            bar_w = int(bar_max_w * frac)
+
+            bar_rect = QRect(bar_left, int(y) + 4, bar_w, row_h - 6)
+            corner_radius = 3
+
+            # Bar
+            p.setPen(Qt.NoPen)
+            p.setBrush(bar_base_col)
+            p.drawRoundedRect(bar_rect, corner_radius, corner_radius)
+
+            hi_rect = QRect(bar_rect.left(), bar_rect.top(),
+                            bar_rect.width(), 4)
+            p.setBrush(bar_highlight_col)
+            p.drawRoundedRect(hi_rect, corner_radius, corner_radius)
+
+            # Skill-Name
+            p.setPen(Qt.white)
+            skill_rect = QRect(bar_left + 4, int(y) + 2,
+                            bar_max_w - 8, row_h)
+            p.drawText(skill_rect,
+                    Qt.AlignVCenter | Qt.AlignLeft, skill)
+
+            # Zahlen-Spalten zentriert
+            p.setPen(QColor(230, 230, 230))
+            hits_rect = QRect(col_hits_x, int(y) + 2, col_hits_w, row_h)
+            total_rect = QRect(col_total_x, int(y) + 2, col_total_w, row_h)
+            avg_rect = QRect(col_avg_x, int(y) + 2, col_avg_w, row_h)
+
+            p.drawText(hits_rect, Qt.AlignCenter, f"{hits}")
+            p.drawText(total_rect, Qt.AlignCenter, f"{total_val:,}")
+            p.drawText(avg_rect, Qt.AlignCenter, f"{int(avg):,}")
+
+            y += row_h
+
+        # --- primitive Scrollbar rechts (optional, optisch dezent) ---
+        if max_scroll > 0:
+            sb_x = right + 2
+            sb_w = 4
+            sb_rect = QRect(sb_x, body_top, sb_w, visible_h)
+            p.setPen(QColor(80, 80, 80, 200))
+            p.setBrush(QColor(40, 40, 40, 150))
+            p.drawRect(sb_rect)
+
+            ratio = visible_h / float(content_h)
+            bar_h = max(20, int(visible_h * ratio))
+            pos_ratio = self._table_scroll / float(max_scroll) if max_scroll else 0.0
+            bar_y = body_top + int((visible_h - bar_h) * pos_ratio)
+
+            thumb_rect = QRect(sb_x, bar_y, sb_w, bar_h)
+            p.setBrush(QColor(180, 140, 60, 220))
+            p.setPen(Qt.NoPen)
+            p.drawRect(thumb_rect)
+
+        # --- Summary-Zeile (immer fest unten) ---
+        sum_top = bottom_y - summary_block_h + 4
+
+        p.setPen(header_border)
+        p.drawLine(bar_left, sum_top, right, sum_top)
+        sum_top += 4
+
+        p.setFont(QFont("Arial", 9, QFont.Bold))
+        p.setPen(header_text)
+
+        sum_label_rect = QRect(bar_left, sum_top, bar_max_w, row_h)
+        p.drawText(sum_label_rect,
+                Qt.AlignVCenter | Qt.AlignLeft, "Summary")
+
+        hits_sum_rect = QRect(col_hits_x, sum_top, col_hits_w, row_h)
+        total_sum_rect = QRect(col_total_x, sum_top, col_total_w, row_h)
+        avg_sum_rect = QRect(col_avg_x, sum_top, col_avg_w, row_h)
+
+        p.drawText(hits_sum_rect, Qt.AlignCenter, f"{total_hits_sum}")
+        p.drawText(total_sum_rect, Qt.AlignCenter, f"{total_val_sum:,}")
+        p.drawText(avg_sum_rect, Qt.AlignCenter, f"{int(overall_avg):,}")
+
+        p.end()
 
     ###--- End: initializing functions and update of the overlay ---###
 
@@ -519,11 +705,6 @@ class OverlayWindow(QWidget):
             'hps': COLORS['title_bar_hps'],
             'dts': COLORS['title_bar_dts']
         }
-        ANALYSE_BTN_COLORS = {
-            'dps': COLORS['MODE_BTN_BG_DPS'],
-            'hps': COLORS['MODE_BTN_BG_HPS'],
-            'dts': COLORS['MODE_BTN_BG_DTS']
-        }
         for key, btn in self.stat_mode_btns.items():
             active = (key == mode)
             apply_style(
@@ -536,17 +717,6 @@ class OverlayWindow(QWidget):
                 bold=active
             )
             btn.setChecked(key == mode)
-            # Style the Analyse button in the selected color
-        analyse_color = ANALYSE_BTN_COLORS[mode]
-        apply_style(
-            self.analyse_btn,
-            bg=analyse_color,
-            text_color="white",
-            hover=analyse_color.lighter(120),
-            radius=8,
-            border_w=1,
-            bold=True
-        )
         if self.stat_mode == 'hps':
             self.manual_label.setText("Select ally:")
         elif self.stat_mode == 'dts':
@@ -577,7 +747,8 @@ class OverlayWindow(QWidget):
         self._tail_should_run = True
         def _tail_loop(pth):
             try:
-                with open(pth, 'r', encoding='utf-8', errors='ignore') as f:
+                enc = _detect_encoding(path)
+                with open(pth, 'r', encoding=enc, errors='ignore') as f:
                     f.seek(0, os.SEEK_END)
                     while self._tail_should_run:
                         line = f.readline()
@@ -780,8 +951,6 @@ class OverlayWindow(QWidget):
         rel_t = (now - self.manual_start_time) if self.manual_start_time else 0.0
         evt = {"time": rel_t, "dmg": dmg, "enemy": enemy, "skill": skill}
         self._append_evt('dps', evt)
-        # Pulse
-        ref = self._dynamic_ref_value(); self.hit_pulse = min(1.5, self.hit_pulse + min(1.0, dmg/max(1,ref)))
         # Anzeige auf **aktuellen** Modus mappen
         self._refresh_view_from_mode()
 
@@ -805,8 +974,6 @@ class OverlayWindow(QWidget):
         if rtype:
             evt["rtype"] = rtype  # 'Morale' oder 'Power'
             self._append_evt('hps', evt)
-            ref = self._dynamic_ref_value()
-            self.hit_pulse = min(1.5, getattr(self, "hit_pulse", 0.0) + min(1.0, amount / max(1, ref)))
             self._refresh_view_from_mode()
             return
 
@@ -820,11 +987,14 @@ class OverlayWindow(QWidget):
         if dtype: evt["dtype"] = dtype
         if dtype: evt["max_skill_override"] = f"{skill} ({dtype})"
         self._append_evt('dts', evt)
-        ref = self._dynamic_ref_value(); self.hit_pulse = min(1.5, self.hit_pulse + min(1.0, amount/max(1,ref)))
         self._refresh_view_from_mode()
 
     
     def _toggle_startstop(self):
+        
+        if hasattr(self, "analysis_window") and self.analysis_window.isVisible():
+            self.analysis_window.close()
+        
         if not self.manual_running:
             # --- START ---
             self.manual_running = True
@@ -849,11 +1019,6 @@ class OverlayWindow(QWidget):
                         self.modes[k]['total'] = 0
                         self.modes[k]['max'] = 0
                         self.modes[k]['max_skill'] = '--'
-                        self.modes[k]['recent'].clear()
-                if hasattr(self, "hit_pulse"):
-                    self.hit_pulse = 0.0
-                if hasattr(self, "recent_hits"):
-                    self.recent_hits.clear()
                 if hasattr(self, "sel_target"):
                     self.sel_target = None
 
@@ -876,9 +1041,10 @@ class OverlayWindow(QWidget):
             # Select-combat zurücksetzen und History einhängen
             self.PST_FGHT_DD.blockSignals(True)
             self.PST_FGHT_DD.clear()
-            self.PST_FGHT_DD.addItem("current", userData=None)
-            for it in self.fight_history[-10:][::-1]:  # letzte 10, neuestes oben
-                self.PST_FGHT_DD.addItem(it['label'], userData=it['id'])
+            self.PST_FGHT_DD.addItem("Select combat", userData=None)
+            for it in self.fight_history[-10:][::-1]:
+                label = self._combat_dd_label_for_mode(it)
+                self.PST_FGHT_DD.addItem(label, userData=it['id'])
             self.PST_FGHT_DD.blockSignals(False)
 
             # History-Handler nur EINMAL verbinden
@@ -930,7 +1096,9 @@ class OverlayWindow(QWidget):
                     last_times = [mm['events'][-1]['time'] for mm in self.modes.values() if mm['events']]
                     duration_all = max(last_times) if last_times else 0.0
 
-                    label = f"{ts_label} | {enemy_label}"
+                    #label = f"{ts_label} | {enemy_label}"
+                    base_label = enemy_label
+                    time_label = time.strftime("%H:%M", start_ts)
 
                     def _mode_view(v):
                         return {
@@ -942,10 +1110,12 @@ class OverlayWindow(QWidget):
 
                     snap = {
                         'id': self.fight_seq,
-                        'label': label,
+                        'enemy_label': base_label,
+                        'time_label': time_label,
                         'modes': { k: _mode_view(v) for k, v in self.modes.items() },
                         'duration': duration_all,
                     }
+                    snap['label'] =  f"{base_label} | {time_label}"
                 else:
                     # Fallback für alten Codepfad (nur ein Event-Stream)
                     enemies = sorted({e['enemy'] for e in self.manual_events})
@@ -965,17 +1135,20 @@ class OverlayWindow(QWidget):
 
                 # Dropdown: "current" bleibt Index 0; neuen Eintrag darunter einfügen.
                 self.PST_FGHT_DD.blockSignals(True)
-                self.PST_FGHT_DD.insertItem(1, snap['label'], userData=snap['id'])
+                label_for_mode = self._combat_dd_label_for_mode(snap)
+                self.PST_FGHT_DD.insertItem(1, label_for_mode, userData=snap['id'])
                 self.PST_FGHT_DD.blockSignals(False)
 
             self.update()
        
     
     def _on_manual_selection(self):
+        # wenn im Kampf und noch keine Events → nichts tun
         if self.manual_running is True and not self._agg()['events']:
-            return  # im Kampf, aber noch keine Events
-        txt = self.manual_combo.currentText()
-        self.sel_target = None if txt == "Total" else txt
+            return
+        data = self.manual_combo.currentData()
+        # None = All targets
+        self.sel_target = data
         self._refresh_view_from_mode()
     
        
@@ -1001,7 +1174,6 @@ class OverlayWindow(QWidget):
                 self.modes[k]['total'] = m[k]['total']
                 self.modes[k]['max'] = m[k]['max']
                 self.modes[k]['max_skill'] = m[k]['max_skill']
-                self.modes[k]['recent'] = [e['dmg'] for e in self.modes[k]['events']][-self.recent_hits_cap:]
             # Dauer: letztes Event über alle Modi
             last_times = [mm['events'][-1]['time'] for mm in self.modes.values() if mm['events']]
             self.combat_time = max(last_times) if last_times else 0.0
@@ -1014,41 +1186,60 @@ class OverlayWindow(QWidget):
             mx = max(evts, key=lambda e: e['dmg']) if evts else None
             agg['max'] = mx['dmg'] if mx else 0
             agg['max_skill'] = mx['skill'] if mx else '--'
-            agg['recent'] = [e['dmg'] for e in evts][-self.recent_hits_cap:]
             self.combat_time = evts[-1]['time'] if evts else 0.0
 
         self.sel_target = None
         self._rebuild_target_dropdown()
         self._refresh_view_from_mode()
-        if hasattr(self, 'hit_pulse'):
-            self.hit_pulse = 0.0
-    
-    
-    
+   
     # --- runtime ticker ---
     def _tick(self):
         # Laufzeit während Kampf
         if self.manual_running and not self.manual_waiting and self.manual_start_time:
             now = time.time()
             self.combat_time = now - self.manual_start_time
-            # animation bar tick decay
-            dt = 0.1
-            #self.hit_pulse = max(0.0, self.hit_pulse * (1.0 - self.hit_pulse_decay * dt))
-            for k in ('dps', 'hps', 'dts'):
-                a = self.modes[k]
-                a['pulse'] = max(0.0, a.get('pulse', 0.0) * (1.0 - self.pulse_decay * dt))
             self.update()
-                
-    # --- dynamic values for bar animation ---
-    def _dynamic_ref_value(self):
-        if self.recent_hits:
-            s = sorted(self.recent_hits)
-            p95 = s[int(0.95 * (len(s)-1))]
-        else:
-            p95 = 0
-        return max(1, p95, 0.5 * (self.max_hit or 0))
             
-            
+    # --- overwrite mouse wheel function for table scrolling
+    
+    def wheelEvent(self, event):
+        """scrolling skill table with mouse wheel"""
+        if not hasattr(self, "_table_top_y"):
+            return super().wheelEvent(event)
+
+        pos = event.pos()
+        # Bereich der Tabelle: zwischen Header-Zeile und Summary-Block
+        table_top = self._table_top_y
+        row_h = 22
+
+        bottom_y = self.height() - STARTSTOP_BTN_HEIGHT - FRAME_PADDING
+        summary_block_h = row_h + 8
+        body_top = table_top + 2 * row_h        # nach Header-Zeile
+        body_bottom = bottom_y - summary_block_h - 4
+
+        if not (body_top <= pos.y() <= body_bottom):
+            # Mausrad außerhalb der Tabelle -> normal verarbeiten
+            return super().wheelEvent(event)
+
+        stats = self._build_skill_stats()
+        if not stats:
+            return
+
+        visible_h = max(1, body_bottom - body_top)
+        content_h = len(stats) * row_h
+        max_scroll = max(0, content_h - visible_h)
+        if max_scroll <= 0:
+            return
+
+        # Delta: 120 Einheiten pro "Raster" – wir scrollen 1 Zeile pro Raster
+        steps = event.angleDelta().y() / 120.0
+        self._table_scroll -= steps * row_h
+        self._table_scroll = max(0.0, min(self._table_scroll, max_scroll))
+
+        self.update()
+        event.accept()
+    
+           
     def _copy_to_clipboard(self):
         # ---- Events je nach Code-Stand holen ----
         if hasattr(self, "modes"):  # neuer Multi-Mode-Stand
@@ -1131,19 +1322,101 @@ class OverlayWindow(QWidget):
     
     def _agg(self, mode=None):
         return self.modes[mode or self.stat_mode]
+    
+    def _current_target_label(self):
+        """Text für die linke Titelzeile."""
+        if self.sel_target:
+            return self.sel_target
+        if self.stat_mode == 'hps':
+            return "All allies"
+        elif self.stat_mode == 'dts':
+            return "All sources"
+        else:
+            return "All targets"
+
+    def _build_skill_stats(self):
+        """
+        Aggregiert Events des aktuellen Modes (+ evtl. Target-Filter)
+        zu einer Liste von:
+        { 'skill', 'hits', 'total', 'avg', 'rate' }
+        """
+        agg = self._agg()
+        evts = list(agg['events'])
+
+        # ggf. nach ausgewähltem Target filtern
+        if self.sel_target:
+            evts = [e for e in evts if e['enemy'] == self.sel_target]
+
+        if not evts:
+            return []
+
+        stats = {}
+        for e in evts:
+            key = e['skill']
+            s = stats.setdefault(key, {'skill': key, 'hits': 0, 'total': 0})
+            s['hits'] += 1
+            s['total'] += e['dmg']
+
+        dur = self.combat_time or 1.0
+        for s in stats.values():
+            s['avg'] = s['total'] / s['hits'] if s['hits'] else 0.0
+            s['rate'] = s['total'] / dur if dur > 0 else 0.0
+
+        return sorted(stats.values(), key=lambda x: x['total'], reverse=True)
+
+    def _auto_adjust_height(self):
+        """Passt die Fensterhöhe dynamisch an Anzahl der Skill-Zeilen an."""
+        stats = self._build_skill_stats()
+        row_h = 22
+        header_rows = 2      # Spaltenkopf + Summary
+        visible_rows = max(1, len(stats)) + header_rows
+
+        needed = self._table_top_y + visible_rows * row_h \
+                 + STARTSTOP_BTN_HEIGHT + 2 * FRAME_PADDING
+
+        new_h = int(max(MIN_HEIGHT, min(needed, MAX_HEIGHT)))
+        if self.height() != new_h:
+            self.resize(self.width(), new_h)
 
     def _rebuild_target_dropdown(self):
-        # Targets aus aktuellem Mode
-        evts = self._agg()['events']
-        names = sorted({e['enemy'] for e in evts})
+        agg = self._agg()
+        evts = agg['events']
+
+        metric_short = {'dps': 'DPS', 'hps': 'HPS', 'dts': 'DTPS'}.get(self.stat_mode, 'DPS')
+
+        # --- All targets ---
+        if evts:
+            # Dauer für "All" = bis letztes Event dieses Modes
+            dur_all = evts[-1]['time']
+            rate_all = int(agg['total'] / (dur_all or 1)) if dur_all else 0
+            all_label = f"All targets   ({rate_all} {metric_short})"
+        else:
+            all_label = "All targets"
+
+        # --- pro Target gruppieren ---
+        by_enemy = {}
+        for e in evts:
+            by_enemy.setdefault(e['enemy'], []).append(e)
+
         self.manual_combo.blockSignals(True)
         self.manual_combo.clear()
-        self.manual_combo.addItem("Total")
-        for n in names:
-            self.manual_combo.addItem(n)
+        # Eintrag 0 = All
+        self.manual_combo.addItem(all_label, userData=None)
+
+        for enemy in sorted(by_enemy.keys()):
+            lst = by_enemy[enemy]
+            total = sum(x['dmg'] for x in lst)
+            if len(lst) > 1:
+                dur = lst[-1]['time'] - lst[0]['time']
+            else:
+                dur = lst[-1]['time']
+            rate = int(total / (dur or 1)) if dur else 0
+            txt = f"{enemy}   ({rate} {metric_short})"
+            self.manual_combo.addItem(txt, userData=enemy)
+
         self.manual_combo.setCurrentIndex(0)
         self.manual_combo.blockSignals(False)
-        self.sel_target = None  # „Total“
+        self.sel_target = None
 
     def _refresh_view_from_mode(self):
         agg = self._agg()
@@ -1165,7 +1438,7 @@ class OverlayWindow(QWidget):
         else:
             self.max_hit = agg['max'];  self.max_hit_skill = agg['max_skill']
         # Pulse-Referenz aus Mode-Recent spiegeln
-        self.recent_hits = list(agg['recent'][-self.recent_hits_cap:])
+        self._auto_adjust_height()
         self.update()
 
     def _append_evt(self, mode, evt):
@@ -1175,21 +1448,27 @@ class OverlayWindow(QWidget):
         if evt['dmg'] > agg['max']:
             agg['max'] = evt['dmg']
             agg['max_skill'] = evt.get('max_skill_override', evt['skill'])
-        # Recent für Referenz
-        agg['recent'].append(evt['dmg'])
-        if len(agg['recent']) > self.recent_hits_cap:
-            agg['recent'].pop(0)
-        # NEU: Pulse nur für DIESEN Modus
-        ref = self._ref_value(mode)
-        agg['pulse'] = min(1.5, agg['pulse'] + min(1.0, evt['dmg'] / max(1, ref)))
 
-    def _ref_value(self, mode=None):
-        agg = self._agg(mode)
-        s = sorted(agg['recent'])
-        p95 = s[int(0.95 * (len(s)-1))] if s else 0
-        return max(1, p95, 0.5 * (agg['max'] or 0))
+    def _combat_dd_label_for_mode(self, snap):
+        """Erzeugt den Text für das 'Select combat'-Dropdown je nach aktuellem Modus."""
+        metric_short = {'dps': 'DPS', 'hps': 'HPS', 'dts': 'DTPS'}.get(self.stat_mode, 'DPS')
+        enemy = snap.get('enemy_label', '--')
+        time_s = snap.get('time_label', '')
+        dur = snap.get('duration', 0.0)
+        mode_view = snap.get('modes', {}).get(self.stat_mode, {})
+        total = mode_view.get('total', 0)
 
+        rate = int(total / (dur or 1)) if dur else 0
 
+        # z.B. "Common Forest-boar (09:30)   245 DPS"
+        left = f"{enemy}"
+        middle = f"({time_s})" if time_s else ""
+        right = f"{rate} {metric_short}" if total else ""
+
+        # wir machen es einfach in einer Zeile, leicht „LotRO-Style“
+        parts = [p for p in (left, middle, right) if p]
+        return "  ".join(parts)
+    
     def _reset_all_modes(self):
         if hasattr(self, "modes"):
             for k in ('dps', 'hps', 'dts'):
@@ -1197,7 +1476,6 @@ class OverlayWindow(QWidget):
                 self.modes[k]['total'] = 0
                 self.modes[k]['max'] = 0
                 self.modes[k]['max_skill'] = '--'
-                self.modes[k]['recent'].clear()
         # Anzeige-/Laufzeit-Reset
         self.total_damage = 0
         self.max_hit = 0
@@ -1205,10 +1483,8 @@ class OverlayWindow(QWidget):
         self.combat_time = 0.0
         self.current_enemy = '--'
         self.sel_target = None if hasattr(self, "sel_target") else None
-        # Pulse & Referenz
-        if hasattr(self, "hit_pulse"):
-            self.hit_pulse = 0.0
-        self.recent_hits.clear() if hasattr(self, "recent_hits") else None
+        # Höhe wieder eher minimal halten
+        self._auto_adjust_height()
         
     # --- mouse action ---
     def mousePressEvent(self, e):
@@ -1220,28 +1496,52 @@ class OverlayWindow(QWidget):
     def mouseReleaseEvent(self, e):
         self._drag_start = None; super().mouseReleaseEvent(e)
 
-    # --- open analysis overlay ---
-    def open_analysis_overlay(self):
-        # Gather data you want to send (example structure, adapt as needed)
-        enemy = self.current_enemy
-        stat_mode = self.stat_mode
-        total_time = self.combat_time
-        skill_stats = [
-            # Example: list of dicts, each for a skill (you’ll fill this out from your parsing later)
-            # {'skill': 'Devastating Blow', 'total': 1234, 'dps': 432, ...},
-        ]
-        # Instantiate the analysis overlay, pass the stats
-        self.analysis_window = CombatAnalyseOverlay(
-            parent=self,   # makes it a child window, optional
-            enemy=enemy,
-            stat_mode=stat_mode,
-            total_time=total_time,
-            skill_stats=skill_stats
-        )
-        # Position it below the current overlay
-        geo = self.geometry()
-        self.analysis_window.move(geo.left(), geo.bottom() + 4)
-        self.analysis_window.show()
+    def _compute_skill_stats(self):
+        """
+        Aggregiert nach Skill für den aktuellen Mode.
+        Liefert Liste von Dicts mit:
+        { 'skill': str, 'total': int, 'hits': int, 'avg': float }
+        """
+        evts = list(self._agg()['events'])
+        if not evts:
+            return []
+
+        from collections import defaultdict
+        sums = defaultdict(int)
+        counts = defaultdict(int)
+
+        for e in evts:
+            s = e['skill']
+            dmg = e['dmg']
+            sums[s] += dmg
+            counts[s] += 1
+
+        stats = []
+        for skill, total in sums.items():
+            hits = counts[skill]
+            avg = total / hits if hits else 0.0
+            stats.append({
+                'skill': skill,
+                'total': total,
+                'hits': hits,
+                'avg': avg,
+            })
+
+        # nach total desc sortieren
+        stats.sort(key=lambda s: s['total'], reverse=True)
+        return stats
+
+        
+    def closeEvent(self, event):
+        # Analysefenster schließen, falls noch offen
+        if hasattr(self, "analysis_window") and self.analysis_window.isVisible():
+            self.analysis_window.close()
+
+        # Log-Tailer korrekt stoppen, damit kein Thread überlebt
+        if hasattr(self, "_stop_log_thread"):
+            self._stop_log_thread()
+
+        super().closeEvent(event)
 
     ###--- End: helper functions for interaction with overlay ---###
 
