@@ -4,22 +4,21 @@ ParsingStats is an overlay for [Echoes of Angmar](https://www.echoesofangmar.com
 
 ## Installation:
 
-- Download the [EoA-parsingStats.exe](https://github.com/MaSchm1983/eoa_dps_parser/releases/tag/beta-v0.9.8.0) 
-- Download the [config.ini](https://github.com/MaSchm1983/eoa_dps_parser/blob/main/config.ini)
+- Download the [EoAparsingOverlay.exe](https://github.com/MaSchm1983/eoa_dps_parser/releases/download/beta-v0.9.9/EoAparsingOverlay.exe) 
+- Download the [config.ini](https://github.com/MaSchm1983/eoa_dps_parser/releases/download/beta-v0.9.9/config.ini)
 - Edit <CMBT_LOG_DIR> in **config.ini**
 - (Optional: edit the  <NAMES> of your pets or add the names of your pets if you rename them ingame, otherwise pet damage/heal cannot not be tracked) 
-- The **config.ini** needs to be in the same folder as your **EoA-parsingStats.exe** 
-- Start **EoA-parsingStats.exe**, tab to EoA, rightclick the "Combat Chat" and "Start Chatlogging". 
-- Press the start button on the parsingStats overlay. Parsing will start once an event happens
-- For now, you need to stop the fight by pressing the stop button. And restart it again (will trying to get some Qol here in release version)
-- up to 10 fights should be stored in the "select combat" dropdown menu. 
+- The **config.ini** needs to be in the same folder as your **EoAparsingOverlay.exe** 
+- Start **EoAparsingOverlay.exe**, tab to EoA, rightclick the "Combat Chat" and "Start Chatlogging". 
+- Parsing will start automatically (if you entered your path to the folder with the combat logs correctly)
+- by default, checkbox "stop fight after 30s" is marked. This will stop the current fight and autmatically start a new log session with next hit. you can toggle that off, parsing will than run until you press the stop button manually. 
+- **_Note:_** The overlay will only work as an overlay, if you play EoA in any kind of windowed mode. If you play full screen it also works but not as overlay, it will run in the background. Working on windows layering overtaken by game GUI need .dll coding and I want to keep it simple and not using any data from your computer for that code
 
-## to do / future plans:
 
-- analyzing German combat logs
-- add an "analyse combat" window with details about all attacks and their distribution to the total damage
-- some setting options as Qol and get rid of the config.ini
-- Qol options for starting and stopping a fight.
+
+
+
+
 
 
 
