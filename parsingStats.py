@@ -1,15 +1,20 @@
 ###############################################################################
-#######       Echoes of Angmar DPS parsing overlay (beta 0.9.2)         #######
+#######       Echoes of Angmar DPS parsing overlay (beta 0.9.9)         #######
 ####### ________________________________________________________________#######
 ####### Echoes of Angmar (https://www.echoesofangmar.com/) is a vanilla #######
 ####### version of Lord of the Rings online - Shadows of Angmar as it   #######
-####### was back in the days. Vanilla LotRo did not have as man options #######
-####### for logging combat events and stats, thus its tricky to parse   #######
-####### DPS, but except for some just impossible things it works quite  #######
-####### solid.                                                          #######
+####### was back in the days. Vanilla LotRo did not have as many        #######
+####### options for logging combat events and stats, thus its tricky    #######
+####### to parse stats. However, this parser is capabel to track most   #######
+####### important DAMAGE, HEAL and DAMAGE TAKEN stats. More or less     #######
+####### impossible is calculating e.g. crit chances since this events   #######
+####### are not markes in the combat log. Attempts to calculate them    #######
+####### from raw numbers worked well for e.g. Hunters, but not for      #######
+####### dual-wield classes or classes swapping weapons for skills etc.  #######
 ####### --------------------------------------------------------------- #######
-####### The code so far is in beta state and for development and bug    #######
-####### fix only. It is legal to use it (I asked "Chillzor") but for    #######
+####### The code is in final beta state right before release. For now   #######
+####### code and parser are for development and bug fix only.           #######
+####### It is legal to use it (I asked "Chillzor") but for              #######
 ####### now it is not allowed to distribute it or do advertisment.      #######
 ####### That being sad, only few people should use it at the moment     #######
 ####### for testing purposes and giving feedback, anyone else does it   #######
@@ -33,14 +38,19 @@ from config import (
     TITLE_BAR_HEIGHT, BUTTON_SIZE,
     FRAME_PADDING, DROPDOWN_HEIGHT,
     MODE_BTN_HEIGHT, MODE_BTN_WIDTH,
-    BAR_PADDING, STARTSTOP_BTN_WIDTH, STARTSTOP_BTN_HEIGHT, 
+    BAR_PADDING, STARTSTOP_BTN_WIDTH, STARTSTOP_BTN_HEIGHT, AUTO_STOP_SECONDS,
     FONT_TITLE, FONT_SUBTITLE, FONT_BTN_TEXT,
     FONT_TEXT, FONT_TEXT_CLS_BTN, COLORS, AA_SKILLS
 )
 TARGET_TEXT_HEX = "#f2e3a0"
+
+
 ###############################################################################
-##################### Parse for config.ini for infos ##########################
+####################### Parse config.ini for infos ############################
 ###############################################################################
+
+
+LOG_CHECK_INTERVAL = 10.0      # searching for new combat log file every 10s
 
 # ── searching and loading for config.ini ── 
 if getattr(sys, 'frozen', False):
@@ -55,9 +65,7 @@ config = configparser.ConfigParser()
 read = config.read(config_path)
 if not read:
     raise FileNotFoundError(f"Couldn’t find config.ini at {config_path}")
-
 COMBAT_LOG_FOLDER = config.get('Settings','CMBT_LOG_DIR')
-LOG_CHECK_INTERVAL = 5.0      # searching for new combat log file every 5s
 
 # ── get pet names from config.ini ──
 pets_raw = (
@@ -71,12 +79,11 @@ PET_NAMES = {
 }
 
 DEBUG_PARSE = config.getboolean('Settings', 'DEBUG_PARSE', fallback=False)
-AUTO_STOP_SECONDS = 30.0      # auto stop for parsing if nothing happens for 30s
 
-# ── Helper to read current combat log (will be updated every 5s later) ── 
+# ── Helper to read current combat log (will be updated every 10s later) ── 
 
 def _clean_dir(p: str) -> str:
-    # Quotes + Leerraum weg, Variablen expandieren, normalisieren
+    # remove quotes + white space, expand variables, normalize
     p = (p or "").strip().strip('"').strip("'")
     p = os.path.expandvars(os.path.expanduser(p))
     return os.path.normpath(p)
@@ -88,7 +95,7 @@ def get_latest_combat_log(folder=COMBAT_LOG_FOLDER):
             print(f"[LOG] Invalid log dir: {repr(folder)} -> {repr(base)} (exists={os.path.isdir(base)})")
         return None
 
-    # mehrere übliche Muster erlauben
+    # allow multiple patterns, but usually they are called the same for any clients
     patterns = [
         os.path.join(base, "Combat_*.txt"),
         os.path.join(base, "CombatLog_*.txt"),
@@ -103,6 +110,7 @@ def get_latest_combat_log(folder=COMBAT_LOG_FOLDER):
 
     return max(files, key=os.path.getmtime) if files else None
 
+# ── Helper to avoid decoding issues ── 
 def _detect_encoding(path: str) -> str:
     with open(path, 'rb') as fb:
         head = fb.read(4)
@@ -143,13 +151,6 @@ def apply_style(btn: QPushButton,
         QPushButton:hover {{ background: {hover_rgba}; }}
     """)
 
-###############################################################################
-#######           Helper for tracking all three types                   #######    
-###############################################################################
-
-
-
-
 
 ###############################################################################
 ####### Main routine: building Overlay with widgets and add functions   #######
@@ -169,11 +170,49 @@ class OverlayWindow(QWidget):
         self._create_widgets()            # 4) create all widgets on the overlay
         
         self._update_layout()             # 5) update layout on interact function
-        self.show()   # optional, das show im Main-Window funktioniert aber auch
         self.raise_()
         self.activateWindow()
-        self._toggle_startstop()
+        self._toggle_startstop()          # 6) start and stop parsing
 
+
+    # ── 1) add a chose mode snippet for damage, heal or damage taken ──
+    def _create_stat_mode_buttons(self):
+        self.stat_mode_btns = {
+            'dps': QPushButton("Damage", self),
+            'hps': QPushButton("Heal", self),
+            'dts': QPushButton("Taken", self)
+        }
+        # Use mode colors for buttons
+        MODE_BTN_COLORS = {
+            'dps': COLORS['MODE_BTN_BG_DPS'],
+            'hps': COLORS['MODE_BTN_BG_HPS'],
+            'dts': COLORS['MODE_BTN_BG_DTS']
+        }
+        MODE_BTN_INACTIVE_COLORS = {
+            'dps': COLORS['title_bar_dps'],
+            'hps': COLORS['title_bar_hps'],
+            'dts': COLORS['title_bar_dts']
+        }
+        for key, btn in self.stat_mode_btns.items():
+            btn.setFont(FONT_BTN_TEXT)
+            btn.setFixedSize(MODE_BTN_WIDTH, MODE_BTN_HEIGHT)
+            btn.setCheckable(True)
+            # Default: only 'dps' is active on start
+            active = (key == self.stat_mode)
+            apply_style(
+                btn,
+                bg=MODE_BTN_COLORS[key] if active else MODE_BTN_INACTIVE_COLORS[key],
+                text_color="white" if active else "#d4d4d4",
+                hover=MODE_BTN_COLORS[key].lighter(120),
+                radius=8,
+                border_w=1,
+                bold=active
+            )
+            btn.setChecked(active)
+        # Connect each button
+        self.stat_mode_btns['dps'].clicked.connect(lambda: self._switch_stat_mode('dps'))
+        self.stat_mode_btns['hps'].clicked.connect(lambda: self._switch_stat_mode('hps'))
+        self.stat_mode_btns['dts'].clicked.connect(lambda: self._switch_stat_mode('dts'))
 
     # ── 2) init window size and attributes on startup ──
     def _init_window(self):
@@ -194,17 +233,17 @@ class OverlayWindow(QWidget):
             'dts': {'events': [], 'total': 0, 'max': 0, 'max_skill': '--'},
         }
         
-        # aktuelle Auswahl im Target-Dropdown (None = Total)
+        # --- current selection on target dropdown menu (None = Total) ---
         self.sel_target = None 
         
-        # Kampf-Zusammenfassung
+        # --- combat summary ---
         self.combat_time = 0.0
         self.max_hit = 0
         self.max_hit_skill = '--'
-        self.fight_history = []  # list of dicts
-        self.fight_seq = 0        # laufende ID für Snapshots
+        self.fight_history = []   # list of dicts
+        self.fight_seq = 0        # running IDs for snapshots
         
-         # --- Manual-Run State ---
+        # --- Manual-Run State ---
         self.manual_running = False
         self.manual_waiting = False
         self.manual_start_time = None
@@ -241,51 +280,10 @@ class OverlayWindow(QWidget):
         self._hover_summary = False       # True, wenn Maus über Summary-Zeile    
               
 
-    # ── 1) add a chose mode snippet for damage, heal or damage taken ──
-    def _create_stat_mode_buttons(self):
-        self.stat_mode_btns = {
-            'dps': QPushButton("Damage", self),
-            'hps': QPushButton("Heal", self),
-            'dts': QPushButton("Taken", self)
-        }
-        # Use your mode colors for buttons
-        MODE_BTN_COLORS = {
-            'dps': COLORS['MODE_BTN_BG_DPS'],
-            'hps': COLORS['MODE_BTN_BG_HPS'],
-            'dts': COLORS['MODE_BTN_BG_DTS']
-        }
-        MODE_BTN_INACTIVE_COLORS = {
-            'dps': COLORS['title_bar_dps'],
-            'hps': COLORS['title_bar_hps'],
-            'dts': COLORS['title_bar_dts']
-        }
-        for key, btn in self.stat_mode_btns.items():
-            btn.setFont(FONT_BTN_TEXT)
-            btn.setFixedSize(MODE_BTN_WIDTH, MODE_BTN_HEIGHT)
-            btn.setCheckable(True)
-            # Default: only 'dps' is active on start
-            active = (key == self.stat_mode)
-            apply_style(
-                btn,
-                bg=MODE_BTN_COLORS[key] if active else MODE_BTN_INACTIVE_COLORS[key],
-                text_color="white" if active else "#d4d4d4",
-                hover=MODE_BTN_COLORS[key].lighter(120),
-                radius=8,
-                border_w=1,
-                bold=active
-            )
-            btn.setChecked(active)
-        # Connect each button
-        self.stat_mode_btns['dps'].clicked.connect(lambda: self._switch_stat_mode('dps'))
-        self.stat_mode_btns['hps'].clicked.connect(lambda: self._switch_stat_mode('hps'))
-        self.stat_mode_btns['dts'].clicked.connect(lambda: self._switch_stat_mode('dts'))
-
-
-
     # ── 4) create all widgets on the overlay ──
     def _create_widgets(self):
 
-        # ── Close button in upper right corner ──
+        # --- Close button in upper right corner ---
         self.close_btn = QPushButton("✕", self)
         self.close_btn.setFont(FONT_TEXT_CLS_BTN)
         self.close_btn.setFixedSize(BUTTON_SIZE, BUTTON_SIZE)
@@ -293,7 +291,7 @@ class OverlayWindow(QWidget):
         apply_style(self.close_btn, bg=QColor(0,0,0,70), text_color=TARGET_TEXT_HEX)
 
 
-        # ── past fights selection dropdown ──
+        # --- past fights selection dropdown ---
         self.label = QLabel("Select combat:", self)
         self.label.setFont(FONT_SUBTITLE)
         lbl_width = self.label.fontMetrics().boundingRect(self.label.text()).width()
@@ -303,14 +301,14 @@ class OverlayWindow(QWidget):
         self.PST_FGHT_DD.setFixedHeight(DROPDOWN_HEIGHT)
         self.PST_FGHT_DD.addItem("Select combat")
 
-        # ── start/stop button for manual parsing mode ──
+        # --- start/stop button ---
         self.start_stop_btn = QPushButton("Start", self)
         self.start_stop_btn.setFont(FONT_BTN_TEXT)
         self.start_stop_btn.setFixedSize(STARTSTOP_BTN_WIDTH, STARTSTOP_BTN_HEIGHT)
         apply_style(self.start_stop_btn, bg=COLORS['button_noactive'], text_color=TARGET_TEXT_HEX)
         self.start_stop_btn.clicked.connect(self._toggle_startstop)
 
-        # ── select targets for manual parsed combat ──
+        # --- select targets ---
         self.manual_combo = QComboBox(self)
         self.manual_combo.setFont(FONT_TEXT)
         self.manual_combo.setFixedHeight(DROPDOWN_HEIGHT)
@@ -326,7 +324,7 @@ class OverlayWindow(QWidget):
         self.manual_label.hide()
         
         
-        # ── gemeinsamer LotRO-Style für beide Dropdowns ──
+        # --- style for both dropdown menues ---
         common_dd_style = """
         QComboBox {
             background-color: rgba(0, 0, 0, 190);
@@ -355,11 +353,10 @@ class OverlayWindow(QWidget):
             selection-color: #ffffff;
         }
         """
-
         self.PST_FGHT_DD.setStyleSheet(common_dd_style)
         self.manual_combo.setStyleSheet(common_dd_style)
         
-        
+        # --- checkbox for auto combat stop ---
         
         self.auto_stop_cb = QCheckBox("stop combat after 30s", self)
         self.auto_stop_cb.setFont(FONT_TEXT)
@@ -375,8 +372,7 @@ class OverlayWindow(QWidget):
         )
         self.auto_stop_cb.setChecked(True)
         
-
-        # ── copy button to copy selected parse to clipboard ──
+        # --- copy button for copy selected parse to clipboard ---
         self.copy_btn = QPushButton("Copy", self)
         self.copy_btn.setFont(FONT_BTN_TEXT)
         self.copy_btn.setFixedSize(60, 25)
@@ -386,15 +382,15 @@ class OverlayWindow(QWidget):
 
     # ── 5) styling updated for layout and update on interaction/events ──
     def _update_layout(self):
-        # Höhe im Rahmen halten
+        # --- window height and width ---
         new_h = max(MIN_HEIGHT, min(self.height(), MAX_HEIGHT))
         self.resize(WINDOW_WIDTH, new_h)
 
-        # ── Close-Button ──
+        # --- close button ---
         self.close_btn.move(self.width() - BUTTON_SIZE - FRAME_PADDING,
                             FRAME_PADDING)
 
-        # ── Mode-Buttons (Damage / Heal / Taken) direkt unter Titel ──
+        # --- mode buttons (Damage / Heal / Taken) right under titel bar ---
         mode_btns = list(self.stat_mode_btns.values())
         gap = 6
         btn_w = mode_btns[0].width()
@@ -408,42 +404,40 @@ class OverlayWindow(QWidget):
 
         y += MODE_BTN_HEIGHT + 14
 
-        # ── Info-Bar ("All targets  |  DPS | 19.0s") direkt unter den Buttons ──
-        info_h = 24
-        self._info_bar_y = y          # wird in paintEvent verwendet
-        y += info_h + 10               # etwas Abstand zu den Combos
 
-        # Gemeinsame Breite / X-Position für beide Dropdowns
+        # --- info bar ("All targets  |  DPS | 19.0s") next to mode buttons ---
+        info_h = 24
+        self._info_bar_y = y           # used in paintEvent
+        y += info_h + 10               
+
+        # --- width and positions for both dropdowns ---
         dd_x = FRAME_PADDING + BAR_PADDING
         dd_w = self.width() - 2 * (FRAME_PADDING + BAR_PADDING)
 
-        # ── Select combat (Label verstecken, Combo über volle Breite) ──
+        # --- select combat dropdown ---
         self.label.hide()
         self.PST_FGHT_DD.setGeometry(dd_x, y, dd_w, DROPDOWN_HEIGHT)
 
         y += DROPDOWN_HEIGHT + 6
 
-        # ── Select target / ally / source (Label verstecken, volle Breite) ──
+        # --- select target / ally / source dropdown ---
         self.manual_label.hide()
         self.manual_combo.show()
         self.manual_combo.setGeometry(dd_x, y, dd_w, DROPDOWN_HEIGHT)
 
-        # Startpunkt der Skill-Tabelle
+        # --- start skill table ---
         self._table_top_y = y + DROPDOWN_HEIGHT + 8
 
-        # ── Untere Button-Leiste (Start/Stop, Auto-Stop, Copy) ──
+        # --- lower button bar (Start/Stop button, auto stop cb, copy button) ---
+        # start/stop button
         bottom_y = self.height() - STARTSTOP_BTN_HEIGHT - FRAME_PADDING
-        gutter = FRAME_PADDING + BAR_PADDING   # wie bei Comboboxen/Tabelle
-
-        # Stop-Button links am gleichen Gutter wie oben
+        gutter = FRAME_PADDING + BAR_PADDING   
         self.start_stop_btn.move(gutter, bottom_y)
-
-        # Checkbox direkt rechts daneben
+        # checkbox
         cb_x = self.start_stop_btn.x() + self.start_stop_btn.width() + 12
         cb_y = bottom_y + (STARTSTOP_BTN_HEIGHT - self.auto_stop_cb.sizeHint().height()) // 2
         self.auto_stop_cb.move(cb_x, cb_y)
-
-        # Copy-Button rechts bündig mit dem "Taken"-Button/Tabellenrand
+        # copy-Button
         copy_x = self.width() - self.copy_btn.width() - gutter
         copy_y = bottom_y + (STARTSTOP_BTN_HEIGHT - self.copy_btn.height()) // 2
         self.copy_btn.move(copy_x, copy_y)
@@ -458,48 +452,44 @@ class OverlayWindow(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
 
-        # ---------- halbtransparenter Hintergrund ----------
+        # --- background transparent ---
         p.fillRect(self.rect(), QColor(0, 0, 0, int(0.5 * 255)))
 
-        # ---------- gemeinsame Header-Farben (LotRO-Stil) ----------
-        header_bg     = QColor(60, 40, 20, int(0.95 * 255))   # dunkles Braun
-        header_border = QColor(180, 140, 60, 255)             # Gold/Kante
-        header_text   = QColor(235, 220, 190, 255)            # helles Beige
+        # --- header style ---
+        header_bg     = QColor(60, 40, 20, int(0.95 * 255))   # dark brown
+        header_border = QColor(180, 140, 60, 255)             # golden
+        header_text   = QColor(235, 220, 190, 255)            
         table_text = QColor(0xF2, 0xE3, 0xA0)
 
-        # ---------- Titelbar ----------
+        # --- titel bar ---
         p.fillRect(0, 0, self.width(), TITLE_BAR_HEIGHT, header_bg)
         p.setPen(header_border)
         p.drawLine(0, TITLE_BAR_HEIGHT - 1, self.width(), TITLE_BAR_HEIGHT - 1)
-
         p.setPen(header_text)
         p.setFont(FONT_TITLE)
         fm = p.fontMetrics()
         ty = (TITLE_BAR_HEIGHT + fm.ascent() - fm.descent()) // 2
         p.drawText(FRAME_PADDING, ty, "ParsingStats in EoA v1.0.0")
 
-        # ---------- Info-Bar ("All targets   DPS | 19.0s") ----------
+        # --- info bar ("All targets   DPS | 19.0s") ---
         header_h = 24
         margin_l = 16
-        margin_r = 16  # Platz für Close-Button
+        margin_r = 16  # space for close button
 
         header_y = getattr(
             self,
             "_info_bar_y",
             TITLE_BAR_HEIGHT + MODE_BTN_HEIGHT + 8
         )
-
         info_rect = QRect(
             margin_l,
             header_y,
             self.width() - margin_l - margin_r,
             header_h
         )
-
         p.setBrush(header_bg)
         p.setPen(header_border)
         p.drawRect(info_rect)
-
         title = self._current_target_label()
         p.setFont(QFont("Arial", 10, QFont.Bold))
         p.setPen(header_text)
@@ -508,8 +498,7 @@ class OverlayWindow(QWidget):
             Qt.AlignVCenter | Qt.AlignLeft,
             title
         )
-
-        mode_txt = self.stat_mode.upper()
+        mode_txt = self._metric_short()
         info_txt = f"{mode_txt} mode - Duration | {self.combat_time:.1f}s"
         p.setFont(QFont("Arial", 9))
         p.drawText(
@@ -518,7 +507,7 @@ class OverlayWindow(QWidget):
             info_txt
         )
 
-        # ---------- Skill-Tabelle + Summary ----------
+        # --- skill table + summary ---
         self._skill_row_bounds = []
 
         table_top = self._table_top_y
@@ -538,7 +527,7 @@ class OverlayWindow(QWidget):
         bar_right = col_hits_x - spacing
         bar_max_w = max(40, bar_right - bar_left)
 
-        # --- Header über der Tabelle ---
+        # --- table header ---
         header_y2 = table_top + row_h
         p.setFont(QFont("Arial", 11, QFont.Bold))
         p.setPen(table_text)
@@ -564,17 +553,17 @@ class OverlayWindow(QWidget):
         p.setPen(header_border)
         p.drawLine(bar_left, header_y2 + 2, right, header_y2 + 2)
 
-        # --- Daten holen ---
+        # --- get data ---
         stats = self._build_skill_stats()
         has_stats = bool(stats)
 
         if has_stats:
             max_val = max(s['total'] for s in stats) or 1
         else:
-            # Dummy-Wert, damit spätere Berechnungen nicht crashen
+            # dummy value
             max_val = 1
 
-        # Farben für Bars je nach Modus
+        # --- color for bars related to parsing mode
         if self.stat_mode == 'dps':
             bar_base_col = QColor(150, 40, 40, 230)
             bar_highlight_col = QColor(210, 80, 80, 255)
@@ -585,13 +574,13 @@ class OverlayWindow(QWidget):
             bar_base_col = QColor(40, 40, 130, 230)
             bar_highlight_col = QColor(90, 90, 200, 255)
 
-    # --- globale Summary-Werte über alle Skills ---
-        # DoT-Hits sollen im Summary-Hitcounter NICHT mitgezählt werden
+    # --- global summary values for all skills ---
+        # DoT hits will not count into summary hitcounter ...
         total_hits_sum = sum(
             s['hits'] for s in stats
             if s['skill'] != "DoT damage"
         )
-        total_val_sum = sum(s['total'] for s in stats)  # Schaden inkl. DoTs
+        total_val_sum = sum(s['total'] for s in stats)  # ... whereas total damage includes dot damage
 
         all_min = None
         all_max = None
@@ -607,39 +596,38 @@ class OverlayWindow(QWidget):
 
         overall_avg = (total_val_sum / total_hits_sum) if total_hits_sum else 0.0
 
-        # --- Bereich für Tabelle / Summary nach unten begrenzen ---
+        # --- define are for table and summary ---
         bottom_y = self.height() - STARTSTOP_BTN_HEIGHT - FRAME_PADDING
-        summary_block_h = row_h * 3 + 10           # Linie + Summary + Detail
+        summary_block_h = row_h * 3 + 10           # line + summary + detail
 
-        extra_bottom_gap = 10                      # mehr Platz zwischen Detail & Buttons
+        extra_bottom_gap = 10                      # space between detail lines and buttons
 
         body_top = header_y2 + 6
         body_bottom = bottom_y - summary_block_h - extra_bottom_gap
 
-        # sichtbare Höhe auf ganze Zeilen einrasten
+        # --- bind visible bars to fix column sizes ---
         raw_h = max(0, body_bottom - body_top)
         visible_rows = max(1, raw_h // row_h)
         visible_h = visible_rows * row_h
         body_bottom = body_top + visible_h
 
-        # --- Scroll-Grenzen berechnen ---
+        # --- calculate scrolling borders ---
         content_h = len(stats) * row_h
         max_scroll = max(0, content_h - visible_h)
         self._max_scroll = max_scroll
         self._table_scroll = max(0.0, min(self._table_scroll, float(max_scroll)))
 
-        # Startindex der ersten sichtbaren Zeile (immer ganze Zeilen)
+        # --- staring index for first visbile row
         start_index = int(self._table_scroll // row_h)
-        offset_y = 0  # da wir nur in row_h-Schritten scrollen
+        offset_y = 0  # only scroll for full line ticks
 
-        # --- Zeilen zeichnen ---
+        # --- paint lines ---
         p.setFont(QFont("Arial", 9))
         y = body_top + offset_y
 
         for i in range(start_index, len(stats)):
             if y >= body_bottom:
                 break
-
             s = stats[i]
             skill = s['skill']
             hits = s['hits']
@@ -649,15 +637,15 @@ class OverlayWindow(QWidget):
             row_top = y
             row_bottom = y + row_h
 
-            # Row-Bounds für Klick
+            # row bounds for click
             self._skill_row_bounds.append((row_top, row_bottom, skill))
 
-            # Hintergrund-Highlight: ausgewählt oder Hover
+            # highlight background while selected or hover
             is_selected = (skill == self.selected_skill)
             is_hover = (skill == getattr(self, "_hover_skill", None))
 
             if is_selected or is_hover:
-                alpha = 60 if is_selected else 30   # Selected stärker als Hover
+                alpha = 60 if is_selected else 30   # highlight selected lines more than just hover
                 p.setBrush(QColor(255, 255, 255, alpha))
                 p.setPen(Qt.NoPen)
                 p.drawRect(bar_left - 2, row_top + 2,
@@ -669,7 +657,7 @@ class OverlayWindow(QWidget):
             bar_rect = QRect(bar_left, row_top + 4, bar_w, row_h - 6)
             corner_radius = 3
 
-            # Bar
+            # --- draw bar ---
             p.setPen(Qt.NoPen)
             if self.stat_mode == 'hps':
                 total_val = s['total'] or 1
@@ -679,14 +667,14 @@ class OverlayWindow(QWidget):
 
                 rtype = s.get('rtype', 'morale')
                 if rtype == 'power':
-                    bar_col = QColor(90, 140, 220, 230)   # helleres Blau
+                    bar_col = QColor(90, 140, 220, 230)   
                 else:
-                    bar_col = QColor(70, 150, 70, 230)    # Grün
+                    bar_col = QColor(70, 150, 70, 230)    
 
                 p.setBrush(bar_col)
                 p.drawRoundedRect(bar_rect, corner_radius, corner_radius)
 
-                # leichte Highlight-Linie oben
+                # slight hightlight line upper edge of the bar
                 hi_rect = QRect(bar_rect.left(), bar_rect.top(),
                                 bar_rect.width(), 4)
                 p.setBrush(QColor(255, 255, 255, 40))
@@ -699,18 +687,18 @@ class OverlayWindow(QWidget):
                 frac = total_val / max_val
                 bar_w = int(bar_max_w * frac)
                 bar_rect = QRect(bar_left, row_top + 4, bar_w, row_h - 6)
-
+                # colors for different damage types
                 dtype_colors = {
-                    'common': QColor(140, 140, 140, 230),   # grau
+                    'common': QColor(140, 140, 140, 230),   # grey
                     'shadow': QColor(110, 70, 160, 230),    # violett
-                    'fire':   QColor(190, 110, 40, 230),    # dunkelorange
+                    'fire':   QColor(190, 110, 40, 230),    # dark orange
                     'other':  QColor(90, 90, 120, 230),
                 }
 
                 x = bar_left
                 h = row_h - 6
 
-                # fixe Reihenfolge, damit es nicht springt
+                # --- fixed order ---
                 for key in ('common', 'shadow', 'fire', 'other'):
                     part = by_dtype.get(key, 0)
                     if part <= 0:
@@ -723,13 +711,13 @@ class OverlayWindow(QWidget):
                     p.drawRect(x, row_top + 4, w, h)
                     x += w
 
-                # Highlight-Linie oben
+                # slight hightlight line upper edge of the bar
                 hi_rect = QRect(bar_left, row_top + 4, bar_w, 4)
                 p.setBrush(QColor(255, 255, 255, 40))
                 p.drawRect(hi_rect)    
 
             else:
-                # bisherige DPS/DTPS-Einfarb-Bar
+                # common DPS/DTPS unicolor bar
                 frac = total_val / max_val
                 bar_w = int(bar_max_w * frac)
                 bar_rect = QRect(bar_left, row_top + 4, bar_w, row_h - 6)
@@ -743,21 +731,20 @@ class OverlayWindow(QWidget):
                 p.setBrush(bar_highlight_col)
                 p.drawRoundedRect(hi_rect, corner_radius, corner_radius)
 
-            # Skill-Name
-            #p.setPen(Qt.white)
+            # --- skill name ---
             p.setPen(table_text)
             skill_rect = QRect(bar_left + 4, row_top + 2,
                             bar_max_w - 8, row_h)
             p.drawText(skill_rect,
                     Qt.AlignVCenter | Qt.AlignLeft, skill)
 
-            # Zahlen-Spalten zentriert
+            # --- center columns with numbers ---
             p.setPen(QColor(230, 230, 230))
             hits_rect = QRect(col_hits_x, row_top + 2, col_hits_w, row_h)
             total_rect = QRect(col_total_x, row_top + 2, col_total_w, row_h)
             avg_rect = QRect(col_avg_x, row_top + 2, col_avg_w, row_h)
 
-            # DoT-Hits in Klammern anzeigen
+            # --- show DoT hits in brackets ---
             if skill == "DoT damage":
                 hits_txt = f"({hits})"
             else:
@@ -768,7 +755,7 @@ class OverlayWindow(QWidget):
             p.drawText(avg_rect, Qt.AlignCenter, f"{int(avg):,}")
             y += row_h
 
-        # Wenn es keine Stats gibt, Hinweis im Tabellenbereich anzeigen
+        # --- if no stats are available, info in table are and note for start ingame chat logging ---
         if not has_stats:
             p.setFont(QFont("Arial", 9))
             #p.setPen(QColor(220, 220, 220))
@@ -779,7 +766,7 @@ class OverlayWindow(QWidget):
                 "No data yet. Make sure, you're logging your ingame combat chat!"
             )
             
-        # --- Scrollbar rechts ---
+        # --- scrollbar on the right side ---
         if max_scroll > 0:
             sb_x = right + 2
             sb_w = 4
@@ -798,24 +785,22 @@ class OverlayWindow(QWidget):
             p.setPen(Qt.NoPen)
             p.drawRect(thumb_rect)
 
-        # --- Summary-Zeile (immer fest unten) ---
+        # --- summary line fixed below skill table ---
         sum_top = bottom_y - summary_block_h - extra_bottom_gap + 4
 
         p.setPen(header_border)
         p.drawLine(bar_left, sum_top, right, sum_top)
         sum_top += 4
         
-        # Bereich der Summary-Zeile merken
+        # --- remember summary area ---
         self.summary_rect = QRect(bar_left, sum_top, right - bar_left, row_h)
 
-        # Hover-Highlight für Summary
+        # --- hover highlight for summary ---
         if getattr(self, "_hover_summary", False):
-            p.setBrush(QColor(255, 255, 255, 25))   # leichtes Highlight
+            p.setBrush(QColor(255, 255, 255, 25))  
             p.setPen(Qt.NoPen)
-            # ein bisschen unterhalb der Linie, damit die Linie sichtbar bleibt
             hl_rect = self.summary_rect.adjusted(0, 1, 0, -1)
             p.drawRect(hl_rect)
-        
 
         p.setFont(QFont("Arial", 10, QFont.Bold))
         p.setPen(header_text)
@@ -824,7 +809,7 @@ class OverlayWindow(QWidget):
         p.drawText(sum_label_rect,
                 Qt.AlignVCenter | Qt.AlignLeft, "Summary")
         
-        # merken für Klicks
+        # --- remember for clicking lines ---
         self.summary_rect = QRect(bar_left, sum_top, right - bar_left, row_h)
 
         hits_sum_rect = QRect(col_hits_x, sum_top, col_hits_w, row_h)
@@ -835,19 +820,18 @@ class OverlayWindow(QWidget):
         p.drawText(total_sum_rect, Qt.AlignCenter, f"{total_val_sum:,}")
         p.drawText(avg_sum_rect, Qt.AlignCenter, f"{int(overall_avg):,}")
 
-        # --- Detailblock unter Summary (zweizeilig) ---
+        # --- detail area below summary (two lines) ---
         detail_y = sum_top + row_h + 4
         line_h = row_h
 
         p.setFont(QFont("Arial", 9))
         p.setPen(QColor(180, 140, 60))
         fm = p.fontMetrics()
-        gap = 40  # Abstand zwischen Textblöcken
 
         total_w = right - bar_left
-        # fester Bereich rechts für "min" und "max"
-        col_w = int(total_w * 0.22)  # ggf. nach Geschmack anpassen
-
+        
+        ## --- static area for min and max
+        col_w = int(total_w * 0.22)  
         baseline1 = detail_y + int(0.7 * line_h)
         baseline2 = detail_y + line_h + int(0.7 * line_h)
 
@@ -863,18 +847,15 @@ class OverlayWindow(QWidget):
                 max_val = details['max']
                 total = hits * details['avg']
 
-                # Zeile 1: Skillname (links), min & max (rechts in festen Spalten)
-                # Skillname links
+                # line 1: skill name (left, dynamic lenght), min & max (right, static)
                 p.drawText(bar_left, baseline1, skill_name)
+                # shared column for "min:" / "Total:" 
+                label_col_right = right - 2 * col_w   
+                label_col_width = col_w               
 
-                # -------- gemeinsame Spalte für "min:" / "Total:" --------
-                label_col_right = right - 2 * col_w   # gleiche X-Position wie vorher für "min"
-                label_col_width = col_w                     # Breite reicht locker
-
-                # Zeile 1: "min: <wert>"
+                # line 1: min: <value>
                 label1 = "min:"
                 val1   = f"{min_val}"
-
                 label1_rect = QRect(
                     label_col_right - label_col_width,
                     detail_y,
@@ -882,14 +863,12 @@ class OverlayWindow(QWidget):
                     line_h,
                 )
                 p.drawText(label1_rect, Qt.AlignVCenter | Qt.AlignRight, label1)
-
-                val1_x = label_col_right + 5   # kleiner Abstand rechts vom Doppelpunkt
+                val1_x = label_col_right + 5
                 p.drawText(val1_x, baseline1, val1)
 
-                # Zeile 2: "Total: <wert>"
+                # line 2: total: <value>
                 label2 = "Total:"
                 val2   = f"{int(total):,}"
-
                 label2_rect = QRect(
                     label_col_right - label_col_width,
                     detail_y + line_h,
@@ -897,11 +876,10 @@ class OverlayWindow(QWidget):
                     line_h,
                 )
                 p.drawText(label2_rect, Qt.AlignVCenter | Qt.AlignRight, label2)
-
                 val2_x = label_col_right + 5
                 p.drawText(val2_x, baseline2, val2)
 
-                # max ganz rechtsbündig
+                # line 1: max <value>
                 max_txt = f"max: {max_val}"
                 max_rect = QRect(
                     right - col_w - 10,
@@ -911,29 +889,27 @@ class OverlayWindow(QWidget):
                 )
                 p.drawText(max_rect, Qt.AlignVCenter | Qt.AlignRight, max_txt)
 
-                # Zeile 2: Hits (links), total damage
+                # line 2: hits, total damage
                 x = bar_left
                 part = f"Hits: {hits}"
                 p.drawText(x, baseline2, part)
         else:
-            # Gesamtsicht über alle Skills
+            # all skills
             skill_name = "All skills"
             hits = total_hits_sum
             min_val = all_min if all_min is not None else 0
             max_val = all_max if all_max is not None else 0
             total = total_val_sum if total_val_sum is not None else 0
             
-            # Zeile 1: Skillname links, min/max rechts
+            # line 1: skill name (left, dynamic lenght), min & max (right, static)
             p.drawText(bar_left, baseline1, skill_name)
+            # shared column for "min:" / "Total:"
+            label_col_right = right - 2 * col_w  
+            label_col_width = col_w              
 
-            # -------- gemeinsame Spalte für "min:" / "Total:" --------
-            label_col_right = right - 2 * col_w   # gleiche X-Position wie vorher für "min"
-            label_col_width = col_w                     # Breite reicht locker
-
-            # Zeile 1: "min: <wert>"
+            # line 1: min: <value>
             label1 = "min:"
             val1   = f"{min_val}"
-
             label1_rect = QRect(
                 label_col_right - label_col_width,
                 detail_y,
@@ -941,25 +917,23 @@ class OverlayWindow(QWidget):
                 line_h,
             )
             p.drawText(label1_rect, Qt.AlignVCenter | Qt.AlignRight, label1)
-
-            val1_x = label_col_right + 5   # kleiner Abstand rechts vom Doppelpunkt
+            val1_x = label_col_right + 5
             p.drawText(val1_x, baseline1, val1)
 
-            # Zeile 2: "Total: <wert>"
+            # line 2: total: <value>
             label2 = "Total:"
             val2   = f"{int(total):,}"
-
             label2_rect = QRect(
                 label_col_right - label_col_width,
                 detail_y + line_h,
                 label_col_width,
                 line_h,
             )
-            p.drawText(label2_rect, Qt.AlignVCenter | Qt.AlignRight, label2)
-
+            p.drawText(label2_rect, Qt.AlignVCenter | Qt.AlignRight, label2)            
             val2_x = label_col_right + 5
             p.drawText(val2_x, baseline2, val2)
-
+            
+            # line 1: max <value>
             max_txt = f"max: {max_val}"
             max_rect = QRect(
                 right - col_w - 10,
@@ -969,12 +943,12 @@ class OverlayWindow(QWidget):
             )
             p.drawText(max_rect, Qt.AlignVCenter | Qt.AlignRight, max_txt)
 
-            # Zeile 2: Hits / Total          
+            # line 2: hits, total damage          
             x = bar_left
             part = f"Hits: {hits}"
             p.drawText(x, baseline2, part)
 
-        # Linie unterhalb der Detailzeilen (unterer Abschluss des Blocks)
+        # line below detail area
         p.setPen(header_border)
         p.drawLine(
             bar_left,
@@ -986,6 +960,8 @@ class OverlayWindow(QWidget):
         p.end()
 
     ###--- End: initializing functions and update of the overlay ---###
+
+
 
     ###--- Start: functionality functions and parsing routines ---###
 
@@ -1640,10 +1616,29 @@ class OverlayWindow(QWidget):
                 if (self._tail_thread is None) or (not self._tail_thread.is_alive()):
                     self._ensure_log_thread()
 
-        # 3) Laufzeit im aktuellen Kampf aktualisieren
-        if self.manual_running and not self.manual_waiting and self.manual_start_time:
-            self.combat_time = now - self.manual_start_time
+            # 2b) Start/Stop-Button leicht grün pulsieren lassen, solange tracing läuft
+            import math
+            base_col = COLORS['button_active']
+            phase = (now * 1.5) % (2 * math.pi)  # Puls-Frequenz
+            factor = 110 + int(40 * math.sin(phase))  # 110% ± 20%
 
+            # .lighter erwartet Prozentangabe (100 = normal)
+            factor = max(40, min(200, factor))
+            pulse_bg = base_col.lighter(factor)
+            hover_col = pulse_bg.lighter(120)
+
+            apply_style(
+                self.start_stop_btn,
+                bg=pulse_bg,
+                text_color=TARGET_TEXT_HEX,
+                hover=hover_col,
+                bold=True,
+            )
+
+        # 3) Laufzeit im aktuellen Kampf NICHT mehr per now-Startzeit setzen.
+        #    combat_time wird ausschließlich in _refresh_view_from_mode
+        #    aus den Event-Zeitstempeln berechnet.
+        
         # 4) Auto-Stop nach X Sekunden Inaktivität
         if (
             self.manual_running
