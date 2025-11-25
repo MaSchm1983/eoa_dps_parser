@@ -24,6 +24,9 @@
 ####### Code is free but owner remains the Author:                      #######
 ####### https://github.com/MaSchm1983                                   #######
 ###############################################################################
+####### Copyright (c) 2025 MaSchm1983                                   #######
+####### Licensed under the MIT License. See LICENSE file for details.   #######
+###############################################################################
 
 
 import sys, configparser, os, glob, re
