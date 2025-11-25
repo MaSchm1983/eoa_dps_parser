@@ -14,6 +14,10 @@ ParsingStats is an overlay for [Echoes of Angmar](https://www.echoesofangmar.com
 - by default, checkbox "stop fight after 30s" is marked. This will stop the current fight and autmatically start a new log session with next hit. you can toggle that off, parsing will than run until you press the stop button manually. 
 - **_Note:_** The overlay will only work as an overlay, if you play EoA in any kind of windowed mode. If you play full screen it also works but not as overlay, it will run in the background. Working on windows layering overtaken by game GUI need .dll coding and I want to keep it simple and not using any data from your computer for that code
 
+## License
+
+This project is licensed under the MIT License – see the [LICENSE](https://github.com/MaSchm1983/EoAparsingOverlay/blob/main/LICENSE) file for details.
+
 
 
 
