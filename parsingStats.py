@@ -103,6 +103,7 @@ def get_latest_combat_log(folder=COMBAT_LOG_FOLDER):
         os.path.join(base, "Combat_*.txt"),
         os.path.join(base, "CombatLog_*.txt"),
         os.path.join(base, "combat_*.txt"),
+        os.path.join(base, "Kampf_*.txt"),
     ]
     files = []
     for pat in patterns:
