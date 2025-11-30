@@ -1096,9 +1096,9 @@ class OverlayWindow(QWidget):
         low = text.lower()
         if "ihr trefft" in low:
             # Variante mit Skill:
-            # [PREFIX:] Ihr trefft <Ziel> mit der Fertigkeit '<Skill>' und (ihre|seine) Moral nimmt N Punkte Schaden (<dtype>).
-            m = re.match(
-                r"^(?:(?P<prefix>[^:]+):\s*)?Ihr trefft\s+(?P<target>.+?)\s+mit der Fertigkeit\s+'(?P<skill>[^']+)'\s+und\s+(?:ihre|seine)\s+Moral nimmt\s+(?P<amt>[\d\.]+)\s+Punkte Schaden\s+\((?P<dtype>[^)]+)\)\.",
+            # [PREFIX/Timestamp:] ... Ihr trefft <Ziel> mit der Fertigkeit '<Skill>' und (ihre|seine) Moral nimmt N Punkte Schaden (<dtype>).
+            m = re.search(
+                r"Ihr trefft\s+(?P<target>.+?)\s+mit der Fertigkeit\s+'(?P<skill>[^']+)'\s+und\s+(?:ihre|seine)\s+Moral nimmt\s+(?P<amt>[\d\.]+)\s+Punkte Schaden\s+\((?P<dtype>[^)]+)\)\.",
                 text,
                 re.IGNORECASE,
             )
@@ -1120,8 +1120,8 @@ class OverlayWindow(QWidget):
 
             # Variante ohne Skill (DoT):
             # Ihr trefft <Ziel> und (ihre|seine) Moral nimmt N Punkte Schaden (<dtype>).
-            m = re.match(
-                r"^(?:(?P<prefix>[^:]+):\s*)?Ihr trefft\s+(?P<target>.+?)\s+und\s+(?:ihre|seine)\s+Moral nimmt\s+(?P<amt>[\d\.]+)\s+Punkte Schaden\s+\((?P<dtype>[^)]+)\)\.",
+            m = re.search(
+                r"Ihr trefft\s+(?P<target>.+?)\s+und\s+(?:ihre|seine)\s+Moral nimmt\s+(?P<amt>[\d\.]+)\s+Punkte Schaden\s+\((?P<dtype>[^)]+)\)\.",
                 text,
                 re.IGNORECASE,
             )
@@ -1182,7 +1182,7 @@ class OverlayWindow(QWidget):
         low = text.lower()
         if low.startswith("ihr heilt"):
             m = re.match(
-                r"^Ihr heilt\s+(?P<amt>[\d\.]+)\s+Punkte des Schadens\s+\((?P<res>[^)]+)\),\s+den\s+(?P<target>.+?)\s+genommen hat\.",
+                r"Ihr heilt\s+(?P<amt>[\d\.]+)\s+Punkte des Schadens\s+\((?P<res>[^)]+)\),\s+den\s+(?P<target>.+?)\s+genommen ha(?:t|bt)\.",
                 text,
                 re.IGNORECASE,
             )
@@ -1279,7 +1279,7 @@ class OverlayWindow(QWidget):
             # Beispiel:
             # "Wütender Keiler trifft Euch mit der Fertigkeit 'Niedriger allgemeiner Schaden (Nahkampf)'"
             m = re.match(
-                r"^(?P<attacker>.+?)\s+trifft\s+Euch\s+mit der Fertigkeit\s+'(?P<skill>[^']+)'",
+                r"(?P<attacker>.+?)\s+trifft\s+Euch\s+mit der Fertigkeit\s+'(?P<skill>[^']+)'\s+und\s+Eure\s+Moral nimmt\s+(?P<amt>[\d\.]+)\s+Punkte Schaden\s+\((?P<dtype>[^)]+)\)\.",
                 text,
                 re.IGNORECASE,
             )
