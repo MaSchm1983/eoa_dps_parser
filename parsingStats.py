@@ -1275,11 +1275,12 @@ class OverlayWindow(QWidget):
         low = text.lower()
 
         # --- Deutscher Client: "<Mob> trifft Euch mit der Fertigkeit '...'" ---
-        if "trifft euch" in low:
+        if "trifft euch" in low and "moral nimmt" in low:
             # Beispiel:
-            # "Wütender Keiler trifft Euch mit der Fertigkeit 'Niedriger allgemeiner Schaden (Nahkampf)'"
-            m = re.match(
-                r"(?P<attacker>.+?)\s+trifft\s+Euch\s+mit der Fertigkeit\s+'(?P<skill>[^']+)'\s+und\s+Eure\s+Moral nimmt\s+(?P<amt>[\d\.]+)\s+Punkte Schaden\s+\((?P<dtype>[^)]+)\)\.",
+            # "Plündernder Bär trifft Euch mit der Fertigkeit 'Doppelter Schaden (Nahkampf)' und
+            #  Eure Moral nimmt 19 Punkte Schaden (allgemein)."
+            m = re.search(
+                r"(?P<attacker>.+?)\s+trifft\s+Euch\s+mit der Fertigkeit\s+'(?P<skill>[^']+)'\s+und\s+Eur\w*\s+Moral nimmt\s+(?P<amt>[\d\.]+)\s+Punkte Schaden\s+\((?P<dtype>[^)]+)\)\.",
                 text,
                 re.IGNORECASE,
             )
@@ -1288,33 +1289,29 @@ class OverlayWindow(QWidget):
 
             attacker = m.group("attacker").strip()
             raw_skill = m.group("skill").strip()
+            amt = int(re.sub(r"[^\d]", "", m.group("amt")))
+            dtype_raw = m.group("dtype").strip().lower()   # z.B. "allgemein", "schatten", "feuer"
 
-            # Damage-Type grob aus dem Skillnamen ableiten
-            skill_lower = raw_skill.lower()
-            dtype = "common"
-            if "schatten" in skill_lower:
+            # Damage-Type aus deutschem Typnamen mappen
+            if "allgemein" in dtype_raw:
+                dtype = "common"
+            elif "schatten" in dtype_raw:
                 dtype = "shadow"
-            elif "feuer" in skill_lower:
+            elif "feuer" in dtype_raw:
                 dtype = "fire"
+            else:
+                dtype = "other"
 
-            # Skill selbst etwas normalisieren – optional:
-            # "Niedriger allgemeiner Schaden (Nahkampf)" -> "Standard attack"
+            # Skill ggf. normalisieren (optional)
+            skill_lower = raw_skill.lower()
             skill = raw_skill
             if "schaden" in skill_lower:
-                skill = "Hit"  # oder "Standard attack", je nach Geschmack
+                skill = "Hit"
 
-            # WICHTIG:
-            # Diese Zeile enthält noch KEINE Schadenszahl -> wir können hier
-            # noch keinen DTPS-Eintrag erzeugen.
-            #
-            # D.h. entweder:
-            #   - wir ignorieren sie komplett (return None), oder
-            #   - wir bauen später ein System, das Angriffszeile + Schadenzeile
-            #     matcht. Dafür bräuchten wir aber ein Beispiel der eigentlichen
-            #     "Eure Moral nimmt ... Schaden"-Zeile im DE-Client.
-            #
-            # Bis wir diese Zeile kennen, ist es am sichersten:
-            return None
+            if DEBUG_PARSE:
+                print(f"[TAKEN-DE] attacker={attacker} skill={skill} amt={amt} dtype={dtype}")
+
+            return ("taken", amt, attacker, skill, dtype)
         
         
 
@@ -1852,11 +1849,11 @@ class OverlayWindow(QWidget):
             if mode == 'dts':
                 dtype_raw = (e.get('dtype') or "").lower()
                 dtype_key = 'other'
-                if 'common' in dtype_raw:
+                if 'common' in dtype_raw or 'allgemein' in dtype_raw:
                     dtype_key = 'common'
-                elif 'shadow' in dtype_raw:
+                elif 'shadow' in dtype_raw or 'schatten' in dtype_raw:
                     dtype_key = 'shadow'
-                elif 'fire' in dtype_raw:
+                elif 'fire' in dtype_raw or 'feuer' in dtype_raw:
                     dtype_key = 'fire'
 
                 # Speziell: "Hit" nach Schadenstyp splitten
