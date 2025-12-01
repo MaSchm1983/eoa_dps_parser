@@ -29,13 +29,19 @@
 ###############################################################################
 
 
-import sys, configparser, os, glob, re
+import sys, glob, re, os
 import time, queue
-from pathlib import Path
 
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QLabel, QComboBox, QCheckBox
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QPushButton, QMenu, QFileDialog, QInputDialog, QMessageBox,
+    QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
+    QLineEdit
+)
+from PyQt5.QtCore import Qt, QRect
 from PyQt5.QtGui import QColor
+from settings_store import load_settings, save_settings
+import config
 from config import (
     WINDOW_WIDTH, MIN_HEIGHT, MAX_HEIGHT,
     TITLE_BAR_HEIGHT, BUTTON_SIZE,
@@ -43,7 +49,8 @@ from config import (
     MODE_BTN_HEIGHT, MODE_BTN_WIDTH,
     BAR_PADDING, STARTSTOP_BTN_WIDTH, STARTSTOP_BTN_HEIGHT, AUTO_STOP_SECONDS,
     FONT_TITLE, FONT_SUBTITLE, FONT_BTN_TEXT,
-    FONT_TEXT, FONT_TEXT_CLS_BTN, COLORS, AA_SKILLS
+    FONT_TEXT, FONT_TEXT_CLS_BTN, COLORS, AA_SKILLS,
+    DEBUG_PARSE, LOG_CHECK_INTERVAL, PET_NAMES
 )
 TARGET_TEXT_HEX = "#f2e3a0"
 
@@ -51,37 +58,6 @@ TARGET_TEXT_HEX = "#f2e3a0"
 ###############################################################################
 ####################### Parse config.ini for infos ############################
 ###############################################################################
-
-
-LOG_CHECK_INTERVAL = 10.0      # searching for new combat log file every 10s
-
-# ── searching and loading for config.ini ── 
-if getattr(sys, 'frozen', False):
-    # we’re in a PyInstaller bundle → exe lives in dist\ folder
-    base_dir = os.path.dirname(sys.executable)
-else:
-    # normal script
-    base_dir = os.path.dirname(__file__)
-
-config_path = os.path.join(base_dir, 'config.ini')
-config = configparser.ConfigParser()
-read = config.read(config_path)
-if not read:
-    raise FileNotFoundError(f"Couldn’t find config.ini at {config_path}")
-COMBAT_LOG_FOLDER = config.get('Settings','CMBT_LOG_DIR')
-
-# ── get pet names from config.ini ──
-pets_raw = (
-    config.get('Pets', 'name', fallback='') or
-    config.get('Pets', 'names', fallback='')
-)
-PET_NAMES = {
-    n.strip().lower()
-    for n in re.split(r'[,\n;]+', pets_raw)
-    if n.strip()
-}
-
-DEBUG_PARSE = config.getboolean('Settings', 'DEBUG_PARSE', fallback=False)
 
 # ── Helper to read current combat log (will be updated every 10s later) ── 
 
@@ -91,28 +67,40 @@ def _clean_dir(p: str) -> str:
     p = os.path.expandvars(os.path.expanduser(p))
     return os.path.normpath(p)
 
-def get_latest_combat_log(folder=COMBAT_LOG_FOLDER):
-    base = _clean_dir(folder)
+def get_latest_combat_log(folder: str = None):
+    """
+    Suche die aktuellste Combat-Log-Datei.
+    Wenn `folder` None ist, wird config.CMBT_LOG_DIR verwendet.
+    """
+    base_raw = folder if folder is not None else config.CMBT_LOG_DIR
+    base = _clean_dir(base_raw)
+
+    if DEBUG_PARSE:
+        print(f"[LOG] get_latest_combat_log: raw={base_raw!r}, cleaned={base!r}")
+
     if not base or not os.path.isdir(base):
         if DEBUG_PARSE:
-            print(f"[LOG] Invalid log dir: {repr(folder)} -> {repr(base)} (exists={os.path.isdir(base)})")
+            print(f"[LOG] Invalid log dir: {repr(base_raw)} -> {repr(base)} (exists={os.path.isdir(base)})")
         return None
 
-    # allow multiple patterns, but usually they are called the same for any clients
     patterns = [
         os.path.join(base, "Combat_*.txt"),
         os.path.join(base, "CombatLog_*.txt"),
         os.path.join(base, "combat_*.txt"),
         os.path.join(base, "Kampf_*.txt"),
     ]
+
     files = []
     for pat in patterns:
         hit = glob.glob(pat)
-        if DEBUG_PARSE:
-            print(f"[LOG] glob {pat} -> {len(hit)}")
+    #    if DEBUG_PARSE:
+    #        print(f"[LOG] glob {pat} -> {len(hit)}")
         files.extend(hit)
 
-    return max(files, key=os.path.getmtime) if files else None
+    latest = max(files, key=os.path.getmtime) if files else None
+    # if DEBUG_PARSE:
+    #    print(f"[LOG] latest={latest!r}")
+    return latest
 
 # ── Helper to avoid decoding issues ── 
 def _detect_encoding(path: str) -> str:
@@ -167,19 +155,24 @@ class OverlayWindow(QWidget):
     # ── init overlay on startup ──
     def __init__(self):
         super().__init__()
-        self.stat_mode = 'dps'            # default mode
-        self._create_stat_mode_buttons()  # 1) add a chose mode snippet for damage, heal or damage taken
-        self._init_window()               # 2) init window size and attributes on startup
-        self._init_data()                 # 3) init any kind of needed data for parsing
-        self._create_widgets()            # 4) create all widgets on the overlay
-        
-        self._update_layout()             # 5) update layout on interact function
+        self.settings = load_settings()      # load user-settings (path to combat log and user pet names
+        self._save_settings = save_settings  # save settings to settings.json in the same folder 
+        if DEBUG_PARSE:
+            print("[CFG] CMBT_LOG_DIR:", config.CMBT_LOG_DIR)
+            print("[CFG] PET_NAMES:", PET_NAMES)
+        self.stat_mode = 'dps'               # default mode
+        self._create_stat_mode_buttons()     # 1a) add a chose mode snippet for damage, heal or damage taken
+        #self._create_settings_button()       # 1b) add a setting menu
+        self._init_window()                  # 2) init window size and attributes on startup
+        self._init_data()                    # 3) init any kind of needed data for parsing
+        self._create_widgets()               # 4) create all widgets on the overlay
+        self._update_layout()                # 5) update layout on interact function
         self.raise_()
         self.activateWindow()
-        self._toggle_startstop()          # 6) start and stop parsing
+        self._toggle_startstop()             # 6) start and stop parsing
 
 
-    # ── 1) add a chose mode snippet for damage, heal or damage taken ──
+    # ── 1a) add a chose mode snippet for damage, heal or damage taken ──
     def _create_stat_mode_buttons(self):
         self.stat_mode_btns = {
             'dps': QPushButton("Damage", self),
@@ -217,6 +210,30 @@ class OverlayWindow(QWidget):
         self.stat_mode_btns['dps'].clicked.connect(lambda: self._switch_stat_mode('dps'))
         self.stat_mode_btns['hps'].clicked.connect(lambda: self._switch_stat_mode('hps'))
         self.stat_mode_btns['dts'].clicked.connect(lambda: self._switch_stat_mode('dts'))
+
+    # ── 1b) add a setting menu ──
+    
+    def _create_settings_button(self):
+        # Text + Zahnrad, damit klar ist, dass das Einstellungen sind
+        self.settings_btn = QPushButton("Settings ⚙", self)
+        self.settings_btn.setToolTip("Einstellungen")
+        self.settings_btn.setFont(FONT_TEXT_CLS_BTN)
+
+        # gleiche Größe wie der Close-Button
+        self.settings_btn.setFixedHeight(BUTTON_SIZE)
+        # Breite nach Inhalt
+        self.settings_btn.adjustSize()
+
+        # Style: wie der Close-Button (gleicher Hintergrund & Textfarbe)
+        apply_style(
+            self.settings_btn,
+            bg=QColor(0, 0, 0, 70),       # wie bei close_btn
+            text_color=TARGET_TEXT_HEX,   # wie das "X"
+            radius=8,
+            border_w=0,
+        )
+
+        self.settings_btn.clicked.connect(self._show_settings_menu)
 
     # ── 2) init window size and attributes on startup ──
     def _init_window(self):
@@ -294,6 +311,8 @@ class OverlayWindow(QWidget):
         self.close_btn.clicked.connect(self.close)
         apply_style(self.close_btn, bg=QColor(0,0,0,70), text_color=TARGET_TEXT_HEX)
 
+        # --- settings right next to close button ---
+        self._create_settings_button()
 
         # --- past fights selection dropdown ---
         self.label = QLabel("Select combat:", self)
@@ -391,9 +410,15 @@ class OverlayWindow(QWidget):
         self.resize(WINDOW_WIDTH, new_h)
 
         # --- close button ---
+        
         self.close_btn.move(self.width() - BUTTON_SIZE - FRAME_PADDING,
                             FRAME_PADDING)
 
+        # --- settings button left of close button ---
+        settings_w = self.settings_btn.sizeHint().width()
+        self.settings_btn.move(self.width() - 2*BUTTON_SIZE - settings_w - 2*FRAME_PADDING,
+                            FRAME_PADDING)
+        
         # --- mode buttons (Damage / Heal / Taken) right under titel bar ---
         mode_btns = list(self.stat_mode_btns.values())
         gap = 6
@@ -764,10 +789,22 @@ class OverlayWindow(QWidget):
             p.setFont(QFont("Arial", 9))
             #p.setPen(QColor(220, 220, 220))
             p.setPen(table_text)
-            p.drawText(
+            no_data_msg=(
+                "No parsing data yet.\n"
+                "Enable combat logging ingame\n"
+                "and check the log folder in Settings."
+            )
+            # Rechteck für den Hinweistext – Breite kannst du anpassen
+            text_rect = QRect(
                 bar_left,
                 body_top + int(row_h),
-                "No data yet. Make sure, you're logging your ingame combat chat!"
+                self.width() - 2 * bar_left,   # z.B. bis fast zum rechten Rand
+                int(row_h * 3),                # Höhe: 3 Zeilen
+            )
+            p.drawText(
+                text_rect,
+                Qt.AlignCenter | Qt.TextWordWrap,
+                no_data_msg,
             )
             
         # --- scrollbar on the right side ---
@@ -1145,6 +1182,8 @@ class OverlayWindow(QWidget):
         if actor_lc.startswith("the "): actor_lc = actor_lc[4:].lstrip()
         is_you = actor_lc.startswith("you")
         is_pet = actor_lc in PET_NAMES
+        if DEBUG_PARSE:
+            print(f"[HIT] actor={actor_lc!r} is_pet={is_pet} PET_NAMES={PET_NAMES}")
         if not (is_you or is_pet): return None
         if rest.lower().startswith("the "): rest = rest[4:].lstrip()
         if " for " not in rest or " points" not in rest: return None
@@ -1493,7 +1532,14 @@ class OverlayWindow(QWidget):
                 enemy_label = names[0] if len(names) == 1 else ("Multi" if names else "--")
 
                 # Dauer = max letztes Event über alle Modi
-                last_times = [mm['events'][-1]['time'] for mm in self.modes.values() if mm['events']]
+                last_times = []
+                for key in ("dps", "dts"):
+                    mm = self.modes.get(key)
+                    if mm and mm['events']:
+                        last_times.append(mm['events'][-1]['time'])
+                if not last_times:
+                    # reiner Heal-Kampf: nimm irgendeinen Mode
+                    last_times = [mm['events'][-1]['time'] for mm in self.modes.values() if mm['events']]
                 duration_all = max(last_times) if last_times else 0.0
 
                 #label = f"{ts_label} | {enemy_label}"
@@ -1519,6 +1565,9 @@ class OverlayWindow(QWidget):
 
                 self.fight_seq += 1
                 self.fight_history.append(snap)
+                
+                # Timer nach Kampfende zurück auf "letztes relevantes Event"
+                self.combat_time = duration_all
 
                 # Dropdown: "current" bleibt Index 0; neuen Eintrag darunter einfügen.
                 self.PST_FGHT_DD.blockSignals(True)
@@ -1617,11 +1666,15 @@ class OverlayWindow(QWidget):
                 if (self._tail_thread is None) or (not self._tail_thread.is_alive()):
                     self._ensure_log_thread()
 
+            # 2a) Live-Timer: solange der Kampf läuft, Zeit seit Start anzeigen
+            if not self.manual_waiting and self.manual_start_time is not None:
+                self.combat_time = now - self.manual_start_time
+
             # 2b) Start/Stop-Button leicht grün pulsieren lassen, solange tracing läuft
             import math
             base_col = COLORS['button_active']
             phase = (now * 1.5) % (2 * math.pi)  # Puls-Frequenz
-            factor = 110 + int(40 * math.sin(phase))  # 110% ± 20%
+            factor = 110 + int(20 * math.sin(phase))  # 110% ± 20%
 
             # .lighter erwartet Prozentangabe (100 = normal)
             factor = max(40, min(200, factor))
@@ -1636,11 +1689,7 @@ class OverlayWindow(QWidget):
                 bold=True,
             )
 
-        # 3) Laufzeit im aktuellen Kampf NICHT mehr per now-Startzeit setzen.
-        #    combat_time wird ausschließlich in _refresh_view_from_mode
-        #    aus den Event-Zeitstempeln berechnet.
-        
-        # 4) Auto-Stop nach X Sekunden Inaktivität
+        # 3) Auto-Stop nach X Sekunden Inaktivität
         if (
             self.manual_running
             and not self.manual_waiting
@@ -1657,7 +1706,7 @@ class OverlayWindow(QWidget):
             # 2) sofort neue Session starten (leerer Kampf, aber Parser bleibt „armed“)
             self._toggle_startstop()
 
-        # 5) Repaint
+        # 4) Repaint
         self.update()
             
     # --- overwrite mouse wheel function for table scrolling
@@ -2037,7 +2086,9 @@ class OverlayWindow(QWidget):
             dur = evts[-1]['time'] if evts else 0.0
             mx_e = None
             
-        self.combat_time = dur
+        # Timer nur überschreiben, wenn der Kampf NICHT gerade live läuft.
+        if not self.manual_running:
+            self.combat_time = dur
         if mx_e:
             self.max_hit = mx_e['dmg']; 
             self.max_hit_skill = mx_e.get('max_skill_override', mx_e['skill'])
@@ -2101,6 +2152,187 @@ class OverlayWindow(QWidget):
         self._skill_row_bounds = []        
         self._auto_adjust_height()
         
+    # --- functions for settings menu ---
+        
+    def _show_settings_menu(self):
+        menu = QMenu(self)
+        act_folder = menu.addAction("Combat log folder…")
+        act_pets = menu.addAction("Custom pet names…")
+
+        pos = self.settings_btn.mapToGlobal(self.settings_btn.rect().bottomRight())
+        action = menu.exec_(pos)
+
+        if action == act_folder:
+            self._change_log_folder()
+        elif action == act_pets:
+            self._edit_custom_pet_names()
+    
+    def _change_log_folder(self):
+        start_dir = self.settings.get("cmbt_log_dir") or config.CMBT_LOG_DIR
+
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select LotRO combat log folder",
+            start_dir,
+        )
+        if not folder:
+            return
+
+        folder_norm = folder.replace("\\", "/").rstrip("/")
+
+        config.CMBT_LOG_DIR = folder_norm
+        self.settings["cmbt_log_dir"] = folder_norm
+        self._save_settings(self.settings)
+
+        if DEBUG_PARSE:
+            print("[CFG] CMBT_LOG_DIR updated to:", config.CMBT_LOG_DIR)
+
+        self._stop_log_thread()
+        self._current_log_path = None
+        self._ensure_log_thread()
+
+        QMessageBox.information(
+            self,
+            "Combat log folder",
+            f"Combat log folder is now:\n{folder_norm}\n\n"
+            "Diese Einstellung wird automatisch gespeichert.",
+        )
+    
+    
+    def _edit_pet_names(self):
+            current_list = PET_NAMES
+            current = ", ".join(current_list)
+
+            text, ok = QInputDialog.getMultiLineText(
+                self,
+                "Pet names",
+                "Comma-separated pet names:",
+                current,
+            )
+            if not ok:
+                return
+
+            raw = text.replace("\n", ",")
+            names = [n.strip() for n in raw.split(",") if n.strip()]
+
+            if not names:
+                QMessageBox.warning(self, "Pet names", "Liste darf nicht komplett leer sein.")
+                return
+
+            # Intern lowercase
+            lowered = [n.lower() for n in names]
+            PET_NAMES[:] = lowered
+
+            # Persistieren
+            self.settings["pet_names"] = list(lowered)
+            self._save_settings(self.settings)
+
+            if DEBUG_PARSE:
+                print("[CFG] PET_NAMES updated:", PET_NAMES)
+
+            QMessageBox.information(self, "Pet names", "Pet names updated and saved.")
+    
+    def _edit_custom_pet_names(self):
+        # Defaults & aktuelle Liste
+        default_set = set(config.DEFAULT_PET_NAMES_LOWER)
+        all_pets = PET_NAMES
+
+        # Custom = alles, was nicht Default ist
+        custom = [n for n in all_pets if n not in default_set]
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Custom pet names")
+
+        layout = QVBoxLayout(dlg)
+
+        lbl = QLabel("Custom pet names (nicht in den Defaults):")
+        layout.addWidget(lbl)
+
+        list_widget = QListWidget()
+        for name in sorted(custom):
+            item = QListWidgetItem(name)
+            list_widget.addItem(item)
+        layout.addWidget(list_widget)
+
+        # Eingabe + Add-Button
+        row = QHBoxLayout()
+        edit = QLineEdit()
+        edit.setPlaceholderText("Neuer Pet-Name…")
+        btn_add = QPushButton("Add")
+        row.addWidget(edit)
+        row.addWidget(btn_add)
+        layout.addLayout(row)
+
+        # Remove / Clear / Close Buttons
+        btn_row = QHBoxLayout()
+        btn_remove = QPushButton("Remove selected")
+        btn_clear = QPushButton("Remove all")
+        btn_close = QPushButton("Close")
+        btn_row.addWidget(btn_remove)
+        btn_row.addWidget(btn_clear)
+        btn_row.addStretch(1)
+        btn_row.addWidget(btn_close)
+        layout.addLayout(btn_row)
+
+        def refresh_list():
+            list_widget.clear()
+            for name in sorted(custom):
+                list_widget.addItem(QListWidgetItem(name))
+
+        def add_name():
+            text = edit.text().strip()
+            if not text:
+                return
+            lower = text.lower()
+            # ignorieren, wenn default oder schon vorhanden
+            if lower in default_set or lower in custom:
+                QMessageBox.information(
+                    dlg,
+                    "Custom pet names",
+                    "Dieser Name ist bereits ein Default oder Custom-Name.",
+                )
+                return
+            custom.append(lower)
+            refresh_list()
+            edit.clear()
+
+        def remove_selected():
+            selected = list_widget.selectedItems()
+            if not selected:
+                return
+            names_to_remove = {it.text() for it in selected}
+            custom[:] = [n for n in custom if n not in names_to_remove]
+            refresh_list()
+
+        def clear_all():
+            if QMessageBox.question(
+                dlg,
+                "Custom pet names",
+                "Wirklich alle Custom-Namen entfernen?",
+            ) == QMessageBox.Yes:
+                custom.clear()
+                refresh_list()
+
+        btn_add.clicked.connect(add_name)
+        btn_remove.clicked.connect(remove_selected)
+        btn_clear.clicked.connect(clear_all)
+        btn_close.clicked.connect(dlg.accept)
+
+        dlg.exec_()
+
+        # Nach Dialog-Ende: Defaults + Custom neu bauen
+        combined = list(config.DEFAULT_PET_NAMES_LOWER) + [
+            n for n in custom if n not in default_set
+        ]
+        PET_NAMES[:] = combined
+
+        # In Settings speichern (nur Custom!)
+        self.settings["custom_pet_names"] = list(custom)
+        self._save_settings(self.settings)
+
+        if DEBUG_PARSE:
+            print("[CFG] PET_NAMES (defaults+custom):", PET_NAMES)   
+    
     # --- mouse action ---
     def mousePressEvent(self, e):
         from PyQt5.QtCore import Qt
