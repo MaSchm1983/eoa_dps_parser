@@ -1,17 +1,16 @@
 # EoA: ParsingStats
 
-ParsingStats is an overlay for [Echoes of Angmar](https://www.echoesofangmar.com/) (vanilla Version of Lord of the Rings online - Shadows of Angmar) that analyse your combat log in real-time and thus track your stats of damaging skills, healing (including power) and damage taken. So far the parser only works for english clients only. Note: **the parsingStats.exe does not access any illegal server stats, it justs load the textfile, where your ingame chat output of the combat chat is logged** 
+ParsingStats is an overlay for [Echoes of Angmar](https://www.echoesofangmar.com/) (vanilla Version of Lord of the Rings online - Shadows of Angmar) that analyse your combat log in real-time and thus track your stats of damaging skills, healing (including power) and damage taken. So far the parser only works for english clients only. Note: **the EoAparsingOverlay.exe does not access any illegal server stats, it just a real-time analyzing of your combat log output** 
 
 ## Installation:
 
 - Download the [EoAparsingOverlay.exe](https://github.com/MaSchm1983/eoa_dps_parser/releases/download/beta-v0.9.9/EoAparsingOverlay.exe) 
-- Download the [config.ini](https://github.com/MaSchm1983/eoa_dps_parser/releases/download/beta-v0.9.9/config.ini)
-- Edit <CMBT_LOG_DIR> in **config.ini**
-- (Optional: edit the  <NAMES> of your pets or add the names of your pets if you rename them ingame, otherwise pet damage/heal cannot not be tracked) 
-- The **config.ini** needs to be in the same folder as your **EoAparsingOverlay.exe** 
-- Start **EoAparsingOverlay.exe**, tab to EoA, rightclick the "Combat Chat" and "Start Chatlogging". 
-- Parsing will start automatically (if you entered your path to the folder with the combat logs correctly)
-- by default, checkbox "stop fight after 30s" is marked. This will stop the current fight and autmatically start a new log session with next hit. you can toggle that off, parsing will than run until you press the stop button manually. 
+- Start the **EoAparsingOverlay.exe**
+- Press **Settings** and select the folder where EoA saves your chat logs (typically it in users ==> documents ==> the lord of the rings online)
+- Optional: Most of the default names of pets, even all names of Captain pets renamed by using certain armaments should be covered. However, if you have some specific pet names (renamed ingame with /pet rename <name>), you need to add the names using the **Settings** menu. You can manage your pet names here. **Otherwise stats from custom pet names cannot be tracked!!**
+- Ingame: Right click the combat chat and press "Start logging" otherwise there will be no update to any logs and thus no tracking.
+- Parsing should start automatically now
+- by default, checkbox "auto stop combat after 30s" is marked. This will stop the current fight if after 30s no event like hitting an enemy or taking damage occurs. Once the fight stopped, the next event will automatically restart a new fight and thus next parsing event. You can toggle that checkbox off, parsing will than run until you press the stop button by yourself.
 - **_Note:_** The overlay will only work as an overlay, if you play EoA in any kind of windowed mode. If you play full screen it also works but not as overlay, it will run in the background. Working on windows layering overtaken by game GUI need .dll coding and I want to keep it simple and not using any data from your computer for that code
 
 ## License
