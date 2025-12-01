@@ -55,3 +55,27 @@ AA_SKILLS = {
     "2H-Waffen-Angriff",
     "Waffen-Angriff",
 }
+
+DEBUG_PARSE = True
+
+# Default-Pfad – nur Fallback, wenn User noch nichts gesetzt hat
+CMBT_LOG_DIR = r"C:/Users/<username>/Documents/The Lord of the Rings Online"
+LOG_CHECK_INTERVAL = 10.0      # searching for new combat log file every 10s
+
+# Default-Pet-Namen (englisch + deutsch etc.)
+DEFAULT_PET_NAMES = [
+    "Raven",
+    "Lesser Giant Eagle",
+    "Bear",
+    "Lynx",
+    "Commoner Herald",
+    "Noble Spirit",
+    "Greater Noble Spirit",
+    "Rabe",
+    "Adler",
+    "Luchs",
+    "Bär",
+]
+DEFAULT_PET_NAMES_LOWER = [n.lower() for n in DEFAULT_PET_NAMES]
+# Aktive Pet-Liste (wird zur Laufzeit überschrieben)
+PET_NAMES = [n.lower() for n in DEFAULT_PET_NAMES]
