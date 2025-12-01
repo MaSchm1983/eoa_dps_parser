@@ -38,8 +38,8 @@ from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLineEdit
 )
-from PyQt5.QtCore import Qt, QRect
-from PyQt5.QtGui import QColor
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QColor, QGuiApplication
 from settings_store import load_settings, save_settings
 import config
 from config import (
@@ -47,7 +47,7 @@ from config import (
     TITLE_BAR_HEIGHT, BUTTON_SIZE,
     FRAME_PADDING, DROPDOWN_HEIGHT,
     MODE_BTN_HEIGHT, MODE_BTN_WIDTH,
-    BAR_PADDING, STARTSTOP_BTN_WIDTH, STARTSTOP_BTN_HEIGHT, AUTO_STOP_SECONDS,
+    STARTSTOP_BTN_WIDTH, STARTSTOP_BTN_HEIGHT, AUTO_STOP_SECONDS,
     FONT_TITLE, FONT_SUBTITLE, FONT_BTN_TEXT,
     FONT_TEXT, FONT_TEXT_CLS_BTN, COLORS, AA_SKILLS,
     DEBUG_PARSE, LOG_CHECK_INTERVAL, PET_NAMES
@@ -155,6 +155,7 @@ class OverlayWindow(QWidget):
     # ── init overlay on startup ──
     def __init__(self):
         super().__init__()
+        self._adjust_fonts_for_dpi()         # adjust fonts to dpi to handle different windows scaling
         self.settings = load_settings()      # load user-settings (path to combat log and user pet names
         self._save_settings = save_settings  # save settings to settings.json in the same folder 
         if DEBUG_PARSE:
@@ -381,7 +382,10 @@ class OverlayWindow(QWidget):
         
         # --- checkbox for auto combat stop ---
         
-        self.auto_stop_cb = QCheckBox("stop combat after 30s", self)
+        self.auto_stop_cb = QCheckBox("", self)
+        self.auto_stop_label = QLabel("auto stop combat after 30s", self)
+        self.auto_stop_label.setStyleSheet(f"color: {TARGET_TEXT_HEX};")
+        self.auto_stop_cb.setToolTip("Atomatically stop parsing after 30s if no event (DMG, Heal or Taken) occurs")
         self.auto_stop_cb.setFont(FONT_TEXT)
         self.auto_stop_cb.setStyleSheet(
             "QCheckBox {"
@@ -410,25 +414,37 @@ class OverlayWindow(QWidget):
         self.resize(WINDOW_WIDTH, new_h)
 
         # --- close button ---
-        
-        self.close_btn.move(self.width() - BUTTON_SIZE - FRAME_PADDING,
-                            FRAME_PADDING)
+        title_center_y = TITLE_BAR_HEIGHT // 2
+        close_x = self.width() - BUTTON_SIZE - FRAME_PADDING
+        close_y = title_center_y - BUTTON_SIZE // 2        
+        self.close_btn.move(close_x,close_y)
 
         # --- settings button left of close button ---
-        settings_w = self.settings_btn.sizeHint().width()
-        self.settings_btn.move(self.width() - 2*BUTTON_SIZE - settings_w - 2*FRAME_PADDING,
-                            FRAME_PADDING)
+        s_w = self.settings_btn.width()
+        s_h = self.settings_btn.height()
+        s_x = close_x - s_w - 6  # kleiner horizontaler Abstand
+        s_y = title_center_y - s_h // 2
+        self.settings_btn.move(s_x, s_y)
         
         # --- mode buttons (Damage / Heal / Taken) right under titel bar ---
-        mode_btns = list(self.stat_mode_btns.values())
-        gap = 6
+        mode_btns = list(self.stat_mode_btns.values()) 
+        n_btns = len(mode_btns)   
         btn_w = mode_btns[0].width()
-        total_w = len(mode_btns) * btn_w + (len(mode_btns) - 1) * gap
-        start_x = (self.width() - total_w) // 2
+        available = self.width() - 2 * FRAME_PADDING
+        total_btn_w = n_btns * btn_w
+
+        if n_btns > 1 and available > total_btn_w:
+            gap = (available - total_btn_w) / float(n_btns - 1)
+        else:
+            # zu wenig Platz – Buttons einfach ohne Gap an FRAME_PADDING kleben
+            gap = 0
+
+        start_x = FRAME_PADDING
         y = TITLE_BAR_HEIGHT + 10
 
         for i, btn in enumerate(mode_btns):
-            btn.move(start_x + i * (btn_w + gap), y)
+            x = int(start_x + i * (btn_w + gap))
+            btn.move(x, y)
             btn.show()
 
         y += MODE_BTN_HEIGHT + 14
@@ -440,8 +456,8 @@ class OverlayWindow(QWidget):
         y += info_h + 10               
 
         # --- width and positions for both dropdowns ---
-        dd_x = FRAME_PADDING + BAR_PADDING
-        dd_w = self.width() - 2 * (FRAME_PADDING + BAR_PADDING)
+        dd_x = FRAME_PADDING
+        dd_w = self.width() - 2 * (FRAME_PADDING)
 
         # --- select combat dropdown ---
         self.label.hide()
@@ -459,13 +475,20 @@ class OverlayWindow(QWidget):
 
         # --- lower button bar (Start/Stop button, auto stop cb, copy button) ---
         # start/stop button
-        bottom_y = self.height() - STARTSTOP_BTN_HEIGHT - FRAME_PADDING
-        gutter = FRAME_PADDING + BAR_PADDING   
+        bottom_y = self.height() - STARTSTOP_BTN_HEIGHT - FRAME_PADDING//2 - 2
+        gutter = FRAME_PADDING
         self.start_stop_btn.move(gutter, bottom_y)
         # checkbox
-        cb_x = self.start_stop_btn.x() + self.start_stop_btn.width() + 12
-        cb_y = bottom_y + (STARTSTOP_BTN_HEIGHT - self.auto_stop_cb.sizeHint().height()) // 2
+        cb_x = self.start_stop_btn.x() + self.start_stop_btn.width() + FRAME_PADDING
+        cb_y = bottom_y + (STARTSTOP_BTN_HEIGHT - self.auto_stop_cb.sizeHint().height()) // 2 + 2
         self.auto_stop_cb.move(cb_x, cb_y)
+        lbl = self.auto_stop_label
+        lbl.adjustSize()
+        lbl_h = lbl.sizeHint().height()
+        lbl_x = cb_x + self.auto_stop_cb.sizeHint().width()
+        lbl_y = cb_y + (self.auto_stop_cb.sizeHint().height() - lbl_h) // 2
+
+        lbl.move(lbl_x, lbl_y)
         # copy-Button
         copy_x = self.width() - self.copy_btn.width() - gutter
         copy_y = bottom_y + (STARTSTOP_BTN_HEIGHT - self.copy_btn.height()) // 2
@@ -494,16 +517,31 @@ class OverlayWindow(QWidget):
         p.fillRect(0, 0, self.width(), TITLE_BAR_HEIGHT, header_bg)
         p.setPen(header_border)
         p.drawLine(0, TITLE_BAR_HEIGHT - 1, self.width(), TITLE_BAR_HEIGHT - 1)
+
         p.setPen(header_text)
         p.setFont(FONT_TITLE)
-        fm = p.fontMetrics()
-        ty = (TITLE_BAR_HEIGHT + fm.ascent() - fm.descent()) // 2
-        p.drawText(FRAME_PADDING, ty, "ParsingStats in EoA v1.0.0")
+
+        # links: bündig mit dem restlichen Content
+        left = FRAME_PADDING
+
+        # rechts: bis kurz vor den Settings/Close-Buttons, falls vorhanden
+        if hasattr(self, "close_btn"):
+            right = self.close_btn.x() - 4  # 4px Luft
+        else:
+            right = self.width() - FRAME_PADDING
+
+        title_rect = QRect(left, 0, right - left, TITLE_BAR_HEIGHT)
+
+        p.drawText(
+            title_rect,
+            Qt.AlignVCenter | Qt.AlignLeft,
+            "ParsingTool for EoA v1.0.0",
+        )
 
         # --- info bar ("All targets   DPS | 19.0s") ---
         header_h = 24
-        margin_l = 16
-        margin_r = 16  # space for close button
+        margin_l = FRAME_PADDING
+        margin_r = FRAME_PADDING  # space for close button
 
         header_y = getattr(
             self,
@@ -2332,6 +2370,34 @@ class OverlayWindow(QWidget):
 
         if DEBUG_PARSE:
             print("[CFG] PET_NAMES (defaults+custom):", PET_NAMES)   
+
+    def _adjust_fonts_for_dpi(self):
+        """Sorgt dafür, dass Fonts auf High-DPI-Systemen nicht „riesig“ werden."""
+        app = QGuiApplication.instance()
+        if not app:
+            return
+        screen = app.primaryScreen()
+        if not screen:
+            return
+
+        dpi = screen.logicalDotsPerInch()  # 96 auf „normalen“ Systemen
+        scale = dpi / 96.0
+
+        # Wenn der User 100 % Skalierung hat → nichts tun
+        if scale <= 1.01:
+            return
+
+        # Fonts global runterskalieren
+        fonts = [FONT_TITLE, FONT_SUBTITLE, FONT_BTN_TEXT, FONT_TEXT, FONT_TEXT_CLS_BTN]
+        for f in fonts:
+            ps = f.pointSizeF()
+            if ps > 0:
+                f.setPointSizeF(ps / scale)
+
+        if DEBUG_PARSE:
+            print(f"[DPI] logical DPI = {dpi}, scale={scale:.2f} -> fonts scaled down")
+
+
     
     # --- mouse action ---
     def mousePressEvent(self, e):
