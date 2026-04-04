@@ -50,7 +50,8 @@ from config import (
     STARTSTOP_BTN_WIDTH, STARTSTOP_BTN_HEIGHT, AUTO_STOP_SECONDS,
     FONT_TITLE, FONT_SUBTITLE, FONT_BTN_TEXT,
     FONT_TEXT, FONT_TEXT_CLS_BTN, COLORS, AA_SKILLS,
-    DEBUG_PARSE, LOG_CHECK_INTERVAL, PET_NAMES
+    DEBUG_PARSE, LOG_CHECK_INTERVAL, PET_NAMES,
+    HUNTER_SKILL_ALIASES, HUNTER_SKILL_ALIASES_DE
 )
 TARGET_TEXT_HEX = "#f2e3a0"
 
@@ -215,21 +216,21 @@ class OverlayWindow(QWidget):
     # ── 1b) add a setting menu ──
     
     def _create_settings_button(self):
-        # Text + Zahnrad, damit klar ist, dass das Einstellungen sind
+        # Text + Icon, for making sure, that this are settings
         self.settings_btn = QPushButton("Settings ⚙", self)
-        self.settings_btn.setToolTip("Einstellungen")
+        self.settings_btn.setToolTip("Open Settings")
         self.settings_btn.setFont(FONT_TEXT_CLS_BTN)
 
-        # gleiche Größe wie der Close-Button
+        # same hight as close button
         self.settings_btn.setFixedHeight(BUTTON_SIZE)
-        # Breite nach Inhalt
+        # width adjusting to content but will be names 'Settings' only anyways thus 'constant width'
         self.settings_btn.adjustSize()
 
-        # Style: wie der Close-Button (gleicher Hintergrund & Textfarbe)
+        # Style: like close button, same text and bg color
         apply_style(
             self.settings_btn,
-            bg=QColor(0, 0, 0, 70),       # wie bei close_btn
-            text_color=TARGET_TEXT_HEX,   # wie das "X"
+            bg=QColor(0, 0, 0, 70),       # close_btn
+            text_color=TARGET_TEXT_HEX,   # like 'X'
             radius=8,
             border_w=0,
         )
@@ -385,7 +386,7 @@ class OverlayWindow(QWidget):
         self.auto_stop_cb = QCheckBox("", self)
         self.auto_stop_label = QLabel("auto stop combat after 30s", self)
         self.auto_stop_label.setStyleSheet(f"color: {TARGET_TEXT_HEX};")
-        self.auto_stop_cb.setToolTip("Atomatically stop parsing after 30s if no event (DMG, Heal or Taken) occurs")
+        self.auto_stop_cb.setToolTip("Atomatically stop parsing after 30s if no event (DMG, Heal or Taken) occurs.")
         self.auto_stop_cb.setFont(FONT_TEXT)
         self.auto_stop_cb.setStyleSheet(
             "QCheckBox {"
@@ -436,7 +437,7 @@ class OverlayWindow(QWidget):
         if n_btns > 1 and available > total_btn_w:
             gap = (available - total_btn_w) / float(n_btns - 1)
         else:
-            # zu wenig Platz – Buttons einfach ohne Gap an FRAME_PADDING kleben
+            # if not enough space, bind buttons without gap to FRAME_PADDING
             gap = 0
 
         start_x = FRAME_PADDING
@@ -521,10 +522,10 @@ class OverlayWindow(QWidget):
         p.setPen(header_text)
         p.setFont(FONT_TITLE)
 
-        # links: bündig mit dem restlichen Content
+        # left padding: stick to further content
         left = FRAME_PADDING
 
-        # rechts: bis kurz vor den Settings/Close-Buttons, falls vorhanden
+        # right padding: until Settings/Close-Buttons, if available
         if hasattr(self, "close_btn"):
             right = self.close_btn.x() - 4  # 4px Luft
         else:
@@ -598,7 +599,6 @@ class OverlayWindow(QWidget):
         header_y2 = table_top + row_h
         p.setFont(QFont("Arial", 11, QFont.Bold))
         p.setPen(table_text)
-        #p.setPen(QColor(200, 200, 200, 210))
 
         skills_header_rect = QRect(bar_left, header_y2 - row_h + 4,
                                 bar_max_w, row_h)
@@ -641,8 +641,8 @@ class OverlayWindow(QWidget):
             bar_base_col = QColor(40, 40, 130, 230)
             bar_highlight_col = QColor(90, 90, 200, 255)
 
-    # --- global summary values for all skills ---
-        # DoT hits will not count into summary hitcounter ...
+        # --- global summary values for all skills ---
+        # DoT hits will not count into summary hitcounter otherwise it might be too much hits, which are no real 'hits' ...
         total_hits_sum = sum(
             s['hits'] for s in stats
             if s['skill'] != "DoT damage"
@@ -663,12 +663,10 @@ class OverlayWindow(QWidget):
 
         overall_avg = (total_val_sum / total_hits_sum) if total_hits_sum else 0.0
 
-        # --- define are for table and summary ---
+        # --- define area for table and summary ---
         bottom_y = self.height() - STARTSTOP_BTN_HEIGHT - FRAME_PADDING
         summary_block_h = row_h * 3 + 10           # line + summary + detail
-
         extra_bottom_gap = 10                      # space between detail lines and buttons
-
         body_top = header_y2 + 6
         body_bottom = bottom_y - summary_block_h - extra_bottom_gap
 
@@ -822,22 +820,22 @@ class OverlayWindow(QWidget):
             p.drawText(avg_rect, Qt.AlignCenter, f"{int(avg):,}")
             y += row_h
 
-        # --- if no stats are available, info in table are and note for start ingame chat logging ---
+        # --- if no stats are available, info in table area and note for start ingame chat logging ---
         if not has_stats:
             p.setFont(QFont("Arial", 9))
             #p.setPen(QColor(220, 220, 220))
             p.setPen(table_text)
             no_data_msg=(
-                "No parsing data yet.\n"
-                "Enable combat logging ingame\n"
-                "and check the log folder in Settings."
+                "No parsing data registered yet.\n"
+                "Don't forget to enable combat logging\n"
+                "ingame and/or check the log folder in Settings."
             )
-            # Rechteck für den Hinweistext – Breite kannst du anpassen
+            # rectangle for info text - width can be adjusted
             text_rect = QRect(
                 bar_left,
                 body_top + int(row_h),
-                self.width() - 2 * bar_left,   # z.B. bis fast zum rechten Rand
-                int(row_h * 3),                # Höhe: 3 Zeilen
+                self.width() - 2 * bar_left,   
+                int(row_h * 3),                # height: 3 rows
             )
             p.drawText(
                 text_rect,
@@ -909,7 +907,7 @@ class OverlayWindow(QWidget):
 
         total_w = right - bar_left
         
-        ## --- static area for min and max
+        # --- static area for min and max
         col_w = int(total_w * 0.22)  
         baseline1 = detail_y + int(0.7 * line_h)
         baseline2 = detail_y + line_h + int(0.7 * line_h)
@@ -1041,14 +1039,14 @@ class OverlayWindow(QWidget):
     ###--- End: initializing functions and update of the overlay ---###
 
 
-
     ###--- Start: functionality functions and parsing routines ---###
 
-    # ── define parsing mode damage/heal/damage taken by button click ──
+    # ── orchestration parsing mode damage/heal/damage taken by button click ──
     def _switch_stat_mode(self, mode):
         if self.stat_mode == mode:
             return
         self.stat_mode = mode
+        # active and inactive mode button colors
         MODE_BTN_COLORS = {
             'dps': COLORS['MODE_BTN_BG_DPS'],
             'hps': COLORS['MODE_BTN_BG_HPS'],
@@ -1089,13 +1087,13 @@ class OverlayWindow(QWidget):
 
     ###--- Start: helper functions for interaction with overlay ---###
     
-    # --- Tail Lifecycle ---
+    # ── tail loop cycle for reading combat log file ──
     def _ensure_log_thread(self):
-        # Wenn der Thread noch lebt: nichts zu tun
+        # if thread is alive, nothing to do
         if self._tail_thread and self._tail_thread.is_alive():
             return
-
         path = get_latest_combat_log()
+
         if not path:
             if DEBUG_PARSE:
                 print("[LOG] no combat log yet – will retry")
@@ -1104,6 +1102,7 @@ class OverlayWindow(QWidget):
         self._current_log_path = path
         self._tail_should_run = True
 
+        # live reading combat log lines
         def _tail_loop(pth: str):
             try:
                 enc = _detect_encoding(pth)
@@ -1119,7 +1118,7 @@ class OverlayWindow(QWidget):
                         if not parsed:
                             continue
 
-                        # WICHTIG: keine UI-Aufrufe hier, nur Queue!
+                        # IMPORTANT: no UI calls here, just queue!
                         try:
                             if hasattr(self, "_event_queue"):
                                 self._event_queue.put(parsed)
@@ -1131,7 +1130,7 @@ class OverlayWindow(QWidget):
                 if DEBUG_PARSE:
                     print(f"[ERR] tail-loop outer: {e!r}")
             finally:
-                # markieren, dass der Thread beendet ist
+                # threat marked as done
                 self._tail_thread = None
 
         import threading
@@ -1144,33 +1143,33 @@ class OverlayWindow(QWidget):
 
     def _stop_log_thread(self):
         self._tail_should_run = False
-        # daemon thread – kein join nötig
+        # daemon thread – no join necessary
         
-    # --- Logzeile -> Event ---
+    # ── parse line and create events ──
     def _parse_line(self, line):
-        # 1) Eigener Schaden?
-        hit = self._parse_damage_line(line)   # <- das ist dein bisheriger DPS-Parser-Inhalt aus _parse_line
+        # 1) own damage dealt?
+        hit = self._parse_damage_line(line)   
         if hit:  # ('hit', dmg, enemy, skill)
             return hit
-        # 2) Eigenes Heal?
+        # 2) or own healing done?
         heal = self._parse_heal_line(line)
         if heal:  # ('heal', amount, target, skill)
             return heal
-        # 3) Eingehender Schaden?
+        # 3) or damage taken?
         taken = self._parse_taken_line(line)
         if taken:  # ('taken', amount, attacker, skill, dtype)
             return taken
         return None
     
+    # ── if parsed line = damage dealt to opponent, create DPS event ──    
     def _parse_damage_line(self, line):
         text = line.strip()
         if not text: return None
-        
-        
-        # --- Deutscher Client: "Ihr trefft ..." ---
+       
+        # --- German client integration: "Ihr trefft ..." ---
         low = text.lower()
         if "ihr trefft" in low:
-            # Variante mit Skill:
+            # skill case:
             # [PREFIX/Timestamp:] ... Ihr trefft <Ziel> mit der Fertigkeit '<Skill>' und (ihre|seine) Moral nimmt N Punkte Schaden (<dtype>).
             m = re.search(
                 r"Ihr trefft\s+(?P<target>.+?)\s+mit der Fertigkeit\s+'(?P<skill>[^']+)'\s+und\s+(?:ihre|seine)\s+Moral nimmt\s+(?P<amt>[\d\.]+)\s+Punkte Schaden\s+\((?P<dtype>[^)]+)\)\.",
@@ -1182,19 +1181,24 @@ class OverlayWindow(QWidget):
                 skill = m.group("skill").strip()
                 dmg = int(re.sub(r"[^\d]", "", m.group("amt")))
 
-                # Autoattacks erkennst du weiterhin über AA_SKILLS
-                # (hier kannst du die deutschen Skillnamen ergänzen)
+                # auto attacks from german client defined over general AA_SKILLS dict
                 if skill in AA_SKILLS:
                     s_low = skill.lower()
+                    # split aa into melee and ranged attacks
                     if "bow" in s_low or "bogen" in s_low:
                         skill = "Autoattack (ranged)"
                     else:
                         skill = "Autoattack (melee)"
+                else:
+                    # If hunters use fire or light oil, five skills are renamed. with aliases they will count as normal skill
+                    # e.g. "Schneller Bogen: Sternenlicht" ==> "Schneller Bogen",
+                    skill = HUNTER_SKILL_ALIASES_DE.get(skill, skill) 
 
                 return ("hit", dmg, enemy, skill)
 
-            # Variante ohne Skill (DoT):
-            # Ihr trefft <Ziel> und (ihre|seine) Moral nimmt N Punkte Schaden (<dtype>).
+            # no skill case (DoT damage):
+            # dots have no skill name, just information about damage done
+            # [PREFIX/Timestamp:] ... Ihr trefft <Ziel> und (ihre|seine) Moral nimmt N Punkte Schaden (<dtype>).
             m = re.search(
                 r"Ihr trefft\s+(?P<target>.+?)\s+und\s+(?:ihre|seine)\s+Moral nimmt\s+(?P<amt>[\d\.]+)\s+Punkte Schaden\s+\((?P<dtype>[^)]+)\)\.",
                 text,
@@ -1206,9 +1210,7 @@ class OverlayWindow(QWidget):
                 skill = "DoT damage"
                 return ("hit", dmg, enemy, skill)
 
-            # Falls die deutsche Variante doch nicht gepasst hat, weiter mit EN-Parser
-            # (z.B. wenn die Zeile doch was anderes war)
-        
+            # if german version does not fit, go on with normal english parser        
         
         hit_kw = " hit " if " hit " in text else (" hits " if " hits " in text else None)
         if not hit_kw: return None
@@ -1232,30 +1234,31 @@ class OverlayWindow(QWidget):
         except Exception:
             return None
         if " with " in before_for:
+            # skill case:
             enemy_part, skill_part = before_for.split(" with ", 1)
             skill = skill_part.strip().rstrip(".")
+             # auto attacks from english client defined over general AA_SKILLS dict
             if skill in AA_SKILLS:
-                # Unterscheide nach Name – z.B. "Bow Attack" → Autoattack (ranged)
+                # split aa into melee and ranged attacks
                 if "bow" in skill.lower():
                     skill = "Autoattack (ranged)"
                 else:
                     skill = "Autoattack (melee)"
+            else:
+                # If hunters use fire or light oil, five skills are renamed. with aliases they will count as normal skill
+                # e.g. "Swift Bow: Star-light" ==> "Swift Bow",
+                skill = HUNTER_SKILL_ALIASES.get(skill, skill) 
         else:
             enemy_part = before_for; skill = "DoT damage"
         enemy = enemy_part.strip().rstrip(".")
         return ("hit", dmg, enemy, skill, is_pet)
 
+    # ── if parsed line = healing done, create HPS event ── 
     def _parse_heal_line(self, line: str):
-        """
-        Liefert:
-        ('heal', amount:int, target:str, skill:str, rtype:str|None)
-        rtype ∈ {'Morale','Power'} wenn vorhanden.
-        """
         text = line.strip()
         if not text:
             return None
-        
-         # --- Deutscher Client: "Ihr heilt N Punkte des Schadens (Moral) ..." ---
+        # --- German client integration: "Ihr heilt N Punkte des Schadens (Moral) ..." ---
         low = text.lower()
         if low.startswith("ihr heilt"):
             m = re.match(
@@ -1274,7 +1277,7 @@ class OverlayWindow(QWidget):
                     rtype = None
 
                 target = m.group("target").strip()
-                # Selbstheilung auf "You" mappen
+                # map selfheal to "You"
                 if target.lower() in ("ihr", "euch", "euer", "euch selbst"):
                     target = "You"
 
@@ -1291,11 +1294,11 @@ class OverlayWindow(QWidget):
 
         t = text.rstrip()
 
-        # Hilfs-Teil für Ressource:
+        # Helper for healing type (moral or power):
         # … (Morale points) | (Power points) | (points of Morale/Power) | points
         res_part = r"(?:(?P<res1>Morale|Power)\s+points?|points?\s+of\s+(?P<res2>Morale|Power)|points?)"
 
-        # A) "<actor> heal(s|ed) <target> for N <res_part>"
+        # --- english client integration: A) "<actor> heal(s|ed) <target> for N <res_part>" ==> e.g. herald heal or FM heals
         m = re.search(
             rf"^(?P<actor>.+?)\s+heal(?:s|ed)?\s+(?P<target>.+?)\s+for\s+(?P<amt>[\d,]+)\s+{res_part}(?:\.\s*)?$",
             t, re.IGNORECASE)
@@ -1312,11 +1315,11 @@ class OverlayWindow(QWidget):
                 target = "You"
 
             amt = to_int(m.group("amt"))
-            rtype = (m.group("res1") or m.group("res2"))  # None wenn nur "points"
+            rtype = (m.group("res1") or m.group("res2")) 
             skill = "Heal"
             return ("heal", amt, target, skill, rtype)
 
-        # B) "<skill> heals <target> for N <res_part>"  (nur "Your <skill>" zählt)
+        # --- english client integration: B) "<skill> heals <target> for N <res_part>"  (only "Your <skill>" counting)
         m = re.search(
             rf"^(?P<skill>.+?)\s+heal(?:s|ed)?\s+(?P<target>.+?)\s+for\s+(?P<amt>[\d,]+)\s+{res_part}(?:\.\s*)?$",
             t, re.IGNORECASE)
@@ -1336,22 +1339,13 @@ class OverlayWindow(QWidget):
 
         return None
 
+    # ── if parsed line = damage taken, create DTPS event ──
     def _parse_taken_line(self, line: str):
-        """
-        Erkenne eingehenden Schaden.
-        Beispiele:
-        "The Downs Wildcat hits you with Melee Common Low for 45 points of Common damage to Morale"
-        "Goblin hits you for 12 points of Fire damage to Morale."
-        Rückgabe: ("taken", amount:int, attacker:str, skill:str, dtype:str|None) oder None
-        """
         text = line.strip()
         if not text:
             return None
-        
-        
         low = text.lower()
-
-        # --- Deutscher Client: "<Mob> trifft Euch mit der Fertigkeit '...'" ---
+        # --- German client integration: "<Mob> trifft Euch mit der Fertigkeit '...'" ---
         if "trifft euch" in low and "moral nimmt" in low:
             # Beispiel:
             # "Plündernder Bär trifft Euch mit der Fertigkeit 'Doppelter Schaden (Nahkampf)' und
@@ -1367,9 +1361,9 @@ class OverlayWindow(QWidget):
             attacker = m.group("attacker").strip()
             raw_skill = m.group("skill").strip()
             amt = int(re.sub(r"[^\d]", "", m.group("amt")))
-            dtype_raw = m.group("dtype").strip().lower()   # z.B. "allgemein", "schatten", "feuer"
+            dtype_raw = m.group("dtype").strip().lower()   # damage type e.g.. "allgemein", "schatten", "feuer"
 
-            # Damage-Type aus deutschem Typnamen mappen
+            # mapping damage type from german client
             if "allgemein" in dtype_raw:
                 dtype = "common"
             elif "schatten" in dtype_raw:
@@ -1390,13 +1384,11 @@ class OverlayWindow(QWidget):
 
             return ("taken", amt, attacker, skill, dtype)
         
-        
-
         def strip_the(s: str) -> str:
             s = s.strip()
             return s[4:].lstrip() if s.lower().startswith("the ") else s
 
-        # Grundmuster: <actor> hits you [with <skill>] for N points [of <dtype>] damage to Morale
+        # --- English client integration:  <actor> hits you [with <skill>] for N points [of <dtype>] damage to Morale
         m = re.search(
             r"^(?P<actor>.+?)\s+hits?\s+you(?:rself)?(?:\s+with\s+(?P<skill>.+?))?\s+for\s+(?P<amt>[\d,]+)\s+points?(?:\s+of\s+(?P<dtype>[A-Za-z]+))?\s+damage\s+to\s+Morale\.?$",
             text, re.IGNORECASE)
@@ -1406,39 +1398,32 @@ class OverlayWindow(QWidget):
         actor = strip_the(m.group("actor"))
         amt = int(re.sub(r"[^\d]", "", m.group("amt")))
         skill = (m.group("skill") or "Hit").strip()
-        dtype = (m.group("dtype") or "").strip() or None
-
-        # Nur eingehenden Schaden, also Ziel = du; passt durch Regex (… hits you …)
+        dtype = (m.group("dtype") or "").strip() or None # damage type e.g. "shadow", "fire" or "common"
+        # only incoming damage with target "you" (… hits you …)
         return ("taken", amt, actor, skill, dtype)
 
+    # ── interact with UI ──
     def _handle_parsed_event(self, parsed):
-        """
-        Wird im UI-Thread aufgerufen, um ein geparstes Event
-        in die Aggregates einzubauen.
-        """
         if not parsed:
             return
-
         now = time.time()
         self._last_event_time = now
 
-        # Wenn der Parser „aus“ ist, ignorieren wir neue Events
+        # if parser is off, ignore events
         if not self.manual_running:
             return
 
         et = parsed[0]
-
+        # DPS
         if et == 'hit':
-            # neue Variante mit is_pet
+            # get events stats including pet mechanic
             if len(parsed) == 5:
                 _, val, target, skill, is_pet = parsed
-            else:
-                # Fallback für alte Tuples
+            else:                            
                 _, val, target, skill = parsed
                 is_pet = False
-
             self._on_hit(val, target, skill, is_pet)
-
+        # HPS
         elif et == 'heal':
             if len(parsed) == 5:
                 _, val, target, skill, rtype = parsed
@@ -1446,7 +1431,7 @@ class OverlayWindow(QWidget):
                 _, val, target, skill = parsed
                 rtype = None
             self._on_heal(val, target, skill, rtype)
-
+        # DTPS
         elif et == 'taken':
             if len(parsed) == 5:
                 _, val, attacker, skill, dtype = parsed
@@ -1455,18 +1440,25 @@ class OverlayWindow(QWidget):
                 dtype = None
             self._on_taken(val, attacker, skill, dtype)
 
-
+    # ── trigger parsing start on hit ──
     def _on_hit(self, dmg, enemy, skill, is_pet: bool = False):
         if not self.manual_running: return
         now = time.time()
         if self.manual_waiting:
-            self.manual_waiting = False; self.manual_start_time = now
+            self.manual_waiting = False
+            self.manual_start_time = now
         rel_t = (now - self.manual_start_time) if self.manual_start_time else 0.0
-        evt = {"time": rel_t, "dmg": dmg, "enemy": enemy, "skill": skill, "is_pet": bool(is_pet)}
+        evt = {
+            "time": rel_t, 
+            "dmg": dmg, 
+            "enemy": enemy, 
+            "skill": skill, 
+            "is_pet": bool(is_pet)
+        }
         self._append_evt('dps', evt)
-        # Anzeige auf **aktuellen** Modus mappen
         self._refresh_view_from_mode()
 
+    # ── trigger parsing start on heal ──
     def _on_heal(self, amount: int, target: str, skill: str, rtype: str | None):
         if not self.manual_running:
             return
@@ -1474,32 +1466,37 @@ class OverlayWindow(QWidget):
         if self.manual_waiting:
             self.manual_waiting = False
             self.manual_start_time = now
-
         rel_t = (now - self.manual_start_time) if self.manual_start_time else 0.0
-
         evt = {
             "time": rel_t,
             "dmg": amount,
             "enemy": target,
             "skill": skill,
-            "rtype": rtype or "Morale"   # <-- Default setzen
+            "rtype": rtype or "Morale"
         }
         self._append_evt('hps', evt)
         self._refresh_view_from_mode()
 
+    # ── trigger parsing start on damage taken ──
     def _on_taken(self, amount, attacker, skill, dtype):
         if not self.manual_running: return
         now = time.time()
         if self.manual_waiting:
-            self.manual_waiting = False; self.manual_start_time = now
+            self.manual_waiting = False
+            self.manual_start_time = now
         rel_t = (now - self.manual_start_time) if self.manual_start_time else 0.0
-        evt = {"time": rel_t, "dmg": amount, "enemy": attacker, "skill": skill}
+        evt = {
+            "time": rel_t,
+            "dmg": amount,
+            "enemy": attacker,
+            "skill": skill
+        }
         if dtype: evt["dtype"] = dtype
         if dtype: evt["max_skill_override"] = f"{skill} ({dtype})"
         self._append_evt('dts', evt)
         self._refresh_view_from_mode()
 
-    
+    # ── interaction with start/stop button ──    
     def _toggle_startstop(self):
         
         if not self.manual_running:
@@ -1508,21 +1505,21 @@ class OverlayWindow(QWidget):
             self.manual_waiting = True
             self.manual_start_time = None
 
-            # Alle Aggregates & Anzeige zurücksetzen
+            # reset all stats
             self._reset_all_modes()
 
-            # UI: Start-Button aktiv stylen
+            # UI: start-Button active style
             self.start_stop_btn.setText("Stop")
             apply_style(self.start_stop_btn, bg=COLORS['button_active'], text_color=TARGET_TEXT_HEX, bold=True)
 
-            # Tailer aktivieren
+            # Start logging with tail loop
             self._ensure_log_thread()
 
-            # Target-Dropdown neu (nur "Total" oder aus aktuellem Mode)
+            # new Target dropdown from actual mode
 
             self._rebuild_target_dropdown()
 
-            # Select-combat zurücksetzen und History einhängen
+            # reset selected combat and add fight history
             self.PST_FGHT_DD.blockSignals(True)
             self.PST_FGHT_DD.clear()
             self.PST_FGHT_DD.addItem("Select combat", userData=None)
@@ -1531,12 +1528,12 @@ class OverlayWindow(QWidget):
                 self.PST_FGHT_DD.addItem(label, userData=it['id'])
             self.PST_FGHT_DD.blockSignals(False)
 
-            # History-Handler nur EINMAL verbinden
+            # link history handler one time
             if not getattr(self, "_history_signal_bound", False):
                 self.PST_FGHT_DD.currentIndexChanged.connect(self._on_select_combat_changed)
                 self._history_signal_bound = True
 
-            # UI sofort aktualisieren (alles 0)
+            # instant update UI
             self._refresh_view_from_mode()
             return
         else:
@@ -1546,22 +1543,22 @@ class OverlayWindow(QWidget):
             self.start_stop_btn.setText("Start")
             apply_style(self.start_stop_btn, bg=COLORS['button_noactive'], text_color=TARGET_TEXT_HEX)
 
-            # Tailer im Manual-Mode beenden (spart IO). Du kannst ihn anlassen, wenn du willst.
+            # stop logging in manual mode
             self._stop_log_thread()
 
-            # Dropdown mit Zielen füllen
+            # add targets to dropwon
             self._rebuild_target_dropdown()
 
-            # Combat-Time finalisieren (unverändert okay)
+            # finalize combat time to real combat ending (not auto or manual stop, combat ends on last event (hit/heal/taken))
             any_events = any(self.modes[m]['events'] for m in ('dps','hps','dts'))
 
-            # --- Snapshot bauen, nur wenn es wirklich Events gab ---
+            # built snapshot only if events are registered
             if any_events:
                 start_ts = time.localtime(time.time())
                 ts_label = time.strftime("%Y-%m-%d %H:%M", start_ts)
 
              
-                # Label: bevorzugt Gegner aus DPS, sonst Quellen aus DTS, sonst Targets aus HPS
+                # Label: enemies from DPS, otherwise DTS sources or HPS targets
                 def names_from(mode):
                     ev = self.modes[mode]['events']
                     return sorted({e['enemy'] for e in ev}) if ev else []
@@ -1569,14 +1566,14 @@ class OverlayWindow(QWidget):
                 names = names_from('dps') or names_from('dts') or names_from('hps')
                 enemy_label = names[0] if len(names) == 1 else ("Multi" if names else "--")
 
-                # Dauer = max letztes Event über alle Modi
+                # Duration = max last events from all parsing modes (DPS/HPS/DTS)
                 last_times = []
                 for key in ("dps", "dts"):
                     mm = self.modes.get(key)
                     if mm and mm['events']:
                         last_times.append(mm['events'][-1]['time'])
                 if not last_times:
-                    # reiner Heal-Kampf: nimm irgendeinen Mode
+                    # pure 'healing'
                     last_times = [mm['events'][-1]['time'] for mm in self.modes.values() if mm['events']]
                 duration_all = max(last_times) if last_times else 0.0
 
@@ -1604,10 +1601,10 @@ class OverlayWindow(QWidget):
                 self.fight_seq += 1
                 self.fight_history.append(snap)
                 
-                # Timer nach Kampfende zurück auf "letztes relevantes Event"
+                # reset time to actual end of fight (last relevant event)
                 self.combat_time = duration_all
 
-                # Dropdown: "current" bleibt Index 0; neuen Eintrag darunter einfügen.
+                # Dropdown: "current" remains index 0; add new entries below
                 self.PST_FGHT_DD.blockSignals(True)
                 label_for_mode = self._combat_dd_label_for_mode(snap)
                 self.PST_FGHT_DD.insertItem(1, label_for_mode, userData=snap['id'])
@@ -1617,7 +1614,7 @@ class OverlayWindow(QWidget):
        
     
     def _on_manual_selection(self):
-        # wenn im Kampf und noch keine Events → nichts tun
+        # if in fight and still no events ==> do nothing
         if self.manual_running is True and not self._agg()['events']:
             return
         data = self.manual_combo.currentData()
@@ -1625,22 +1622,22 @@ class OverlayWindow(QWidget):
         self.sel_target = data
         self._refresh_view_from_mode()
     
-       
+    # ── handle live data during combat while switching modes (DPS <==> HPS <==> DTS) ──    
     def _on_select_combat_changed(self, idx: int):
-        # Index 0 = "current" → Live-Ansicht
+        # Index 0 = "current" → live data
         if self.PST_FGHT_DD.currentIndex() == 0:
             self._reset_all_modes()
             self._rebuild_target_dropdown()
             self._refresh_view_from_mode()
             return
 
-        # Snapshot holen (per ID aus userData)
+        # get snapshot by ID from userData
         sel_id = self.PST_FGHT_DD.currentData()
         item = next((it for it in self.fight_history if it['id'] == sel_id), None)
         if not item:
             return
 
-        # --- HIER: Snapshot -> per-Mode-States laden ---
+        # here: snapshot -> load stats per mode
         if 'modes' in item:
             m = item['modes']
             for k in ('dps','hps','dts'):
@@ -1648,11 +1645,11 @@ class OverlayWindow(QWidget):
                 self.modes[k]['total'] = m[k]['total']
                 self.modes[k]['max'] = m[k]['max']
                 self.modes[k]['max_skill'] = m[k]['max_skill']
-            # Dauer: letztes Event über alle Modi
+            # Duration: last events from all modes
             last_times = [mm['events'][-1]['time'] for mm in self.modes.values() if mm['events']]
             self.combat_time = max(last_times) if last_times else 0.0
         else:
-            # Fallback für alte Snaps
+            # fallback to old snapshots
             evts = item['events']
             agg = self.modes[self.stat_mode]
             agg['events'] = list(evts)
@@ -1666,9 +1663,9 @@ class OverlayWindow(QWidget):
         self._rebuild_target_dropdown()
         self._refresh_view_from_mode()
    
-    # --- runtime ticker ---
+    # ── runtime ticker / organize parsing ── #
     def _tick(self):
-        # 1) Events aus dem Log-Thread holen (thread-safe über Queue)
+        # 1) get events from log threat (by queue)
         if hasattr(self, "_event_queue"):
             import queue as _qmod
             while True:
@@ -1680,13 +1677,12 @@ class OverlayWindow(QWidget):
 
         now = time.time()
 
-        # 2) Combat-Log-Überwachung (neue Datei / File entsteht erst später)
+        # 2) Monitoring combat log (new file / file will be created during parsing)
         if self.manual_running:
             last_check = getattr(self, "_last_log_check", 0.0)
             if now - last_check >= LOG_CHECK_INTERVAL:
                 self._last_log_check = now
-
-                # Wenn ein Thread läuft, prüfen wir auf Log-Rotation
+                # if a threat is running, check log rotation
                 if self._tail_thread and self._tail_thread.is_alive():
                     latest = get_latest_combat_log()
                     if (
@@ -1700,21 +1696,19 @@ class OverlayWindow(QWidget):
                         self._tail_thread = None
                         self._current_log_path = None
 
-                # Sicherstellen, dass ein Tail-Thread läuft
+                # Make sure a tail threat is running
                 if (self._tail_thread is None) or (not self._tail_thread.is_alive()):
                     self._ensure_log_thread()
 
-            # 2a) Live-Timer: solange der Kampf läuft, Zeit seit Start anzeigen
+            # 2a) live timer: as long as combat is running, show time since start
             if not self.manual_waiting and self.manual_start_time is not None:
                 self.combat_time = now - self.manual_start_time
 
-            # 2b) Start/Stop-Button leicht grün pulsieren lassen, solange tracing läuft
+            # 2b) pulsing start/stop button in light green as long as parsing is active
             import math
             base_col = COLORS['button_active']
-            phase = (now * 1.5) % (2 * math.pi)  # Puls-Frequenz
+            phase = (now * 1.5) % (2 * math.pi)  # pulsing frequency
             factor = 110 + int(20 * math.sin(phase))  # 110% ± 20%
-
-            # .lighter erwartet Prozentangabe (100 = normal)
             factor = max(40, min(200, factor))
             pulse_bg = base_col.lighter(factor)
             hover_col = pulse_bg.lighter(120)
@@ -1727,7 +1721,7 @@ class OverlayWindow(QWidget):
                 bold=True,
             )
 
-        # 3) Auto-Stop nach X Sekunden Inaktivität
+        # 3) auto stop parsing afert x seconds of inactivity
         if (
             self.manual_running
             and not self.manual_waiting
@@ -1738,19 +1732,18 @@ class OverlayWindow(QWidget):
             if DEBUG_PARSE:
                 print(f"[AUTO] segment combat after {AUTO_STOP_SECONDS}s of inactivity")
 
-            # 1) aktuellen Kampf beenden (Snapshot anlegen etc.)
+            # 1) end actual parse and create snapshot
             self._toggle_startstop()
 
-            # 2) sofort neue Session starten (leerer Kampf, aber Parser bleibt „armed“)
+            # 2) restart for new session, next event will start next parse
             self._toggle_startstop()
 
-        # 4) Repaint
+        # 4) Update UI with live data
         self.update()
             
-    # --- overwrite mouse wheel function for table scrolling
-    
+    # ── overwrite mouse wheel function for table scrolling ── 
     def wheelEvent(self, event):
-        # Nur scrollen, wenn wir überhaupt eine Tabelle + Scrollbereich haben
+        # only scrollable if we have a table and a scrolling area
         if not hasattr(self, "_max_scroll") or self._max_scroll <= 0:
             return super().wheelEvent(event)
 
@@ -1758,8 +1751,8 @@ class OverlayWindow(QWidget):
         if delta == 0:
             return
 
-        row_h = 22  # muss zu paintEvent passen
-        steps = int(delta / 120)   # ein "Klick" = 1 Zeile
+        row_h = 22  # needs to fit to paint_event
+        steps = int(delta / 120)   # one scrolling tick = one row
         if steps == 0:
             return
 
@@ -1770,10 +1763,9 @@ class OverlayWindow(QWidget):
             self.update()
             event.accept()
     
-           
+    # ── copy selected event or fight to clipboard (pasteable to ingame chat) ──          
     def _copy_to_clipboard(self):
-        # ---- Events je nach Code-Stand holen ----
-
+        # get selected event
         evts = list(self._agg()['events'])
         sel = getattr(self, "sel_target", None)
         if sel:
@@ -1785,7 +1777,7 @@ class OverlayWindow(QWidget):
         )
         selected_label = sel or target_total_label
         
-        # Dauer
+        # duration
         if not evts:
             duration = 0.0
         else:
@@ -1794,16 +1786,16 @@ class OverlayWindow(QWidget):
         total = sum(e['dmg'] for e in evts)
         rate  = int(total / (duration or 1))
 
-        # ---- Nachricht pro Modus ----
+        # copy text per mode
         if self.stat_mode == 'hps':
-            # Basistext
+            # base text
             base_target = selected_label if 'selected_label' in locals() else (
                 ("all allies" if self.manual_combo.currentText() == "Total" else self.manual_combo.currentText())
             )
-            # Breakdown nach Ressource
+            # breakdown by ressource
             type_totals = {}
             for e in evts:
-                rt = e.get('rtype') or "Morale"  # default Morale, falls nicht geloggt
+                rt = e.get('rtype') or "Morale"  # default Morale if nothing logged
                 type_totals[rt] = type_totals.get(rt, 0) + e['dmg']
 
             parts = []
@@ -1819,13 +1811,13 @@ class OverlayWindow(QWidget):
                 msg = f"You healed {base_target} for {total} over {duration:.1f}s (HPS: {rate}){breakdown}"
 
         elif self.stat_mode == 'dts':
-            # Breakdown nach dtype
+            # breakdown by damage type
             type_totals = {}
             for e in evts:
                 dt = e.get('dtype') or "Unknown"
                 type_totals[dt] = type_totals.get(dt, 0) + e['dmg']
 
-            # sortiert nach Menge absteigend
+            # sorted by damage per type (descending)
             parts = []
             for dt, amt in sorted(type_totals.items(), key=lambda kv: kv[1], reverse=True):
                 pct = (100.0 * amt / total) if total else 0.0
@@ -1853,32 +1845,27 @@ class OverlayWindow(QWidget):
         else:
             return "All targets"
 
-    
+    # ── built skill stats for snapshots used in tables ── 
     def _build_skill_stats(self):
         """
-        Aggregiert Events des aktuellen Modus in tabellenfähige Zeilen.
-
         DPS / DTPS:
-            - Gruppierung nach Skill
-            - Felder: skill, hits, total, avg, min, max
-            - DTPS zusätzlich: by_dtype = {'common': ..., 'shadow': ..., 'fire': ..., 'other': ...}
+            - grouping by skills
+            - fields: skill, hits, total, avg, min, max
+            - additional in DTPS: by_dtype = {'common': ..., 'shadow': ..., 'fire': ..., 'other': ...}
 
         HPS:
-            - Gruppierung nach (ally, rtype)  (ally = Ziel, rtype = 'morale' / 'power')
-            - Felder: skill (Label), ally, rtype, hits, total, avg, min, max
+            - grouping by (ally, rtype)  (ally = target, rtype = 'morale' / 'power')
+            - Fields: skill (label), ally, rtype, hits, total, avg, min, max
         """
         evts = self._agg()['events']
         
         if self.sel_target:
-            evts = [e for e in evts if e['enemy'] == self.sel_target]
-        
+            evts = [e for e in evts if e['enemy'] == self.sel_target]        
         
         if not evts:
             return []
-
         mode = self.stat_mode
-
-        # --- HPS: nach Ally + Ressourcentyp gruppieren ---
+        # --- HPS: by ally + ressource typ ---
         if mode == 'hps':
             by_row = {}  # key: (ally, rtype)
             for e in evts:
@@ -1925,7 +1912,7 @@ class OverlayWindow(QWidget):
             stats.sort(key=lambda s: s['total'], reverse=True)
             return stats
 
-        # --- DPS / DTPS: nach Skill gruppieren ---
+        # --- DPS / DTPS: by skill ---
         by_skill = {}
         for e in evts:
             sname = e['skill']
@@ -1943,7 +1930,7 @@ class OverlayWindow(QWidget):
                 elif 'fire' in dtype_raw or 'feuer' in dtype_raw:
                     dtype_key = 'fire'
 
-                # Speziell: "Hit" nach Schadenstyp splitten
+                # split hits by taken damage type
                 if sname == "Hit":
                     key = (sname, dtype_key)
 
@@ -1977,7 +1964,7 @@ class OverlayWindow(QWidget):
             if mode == 'dts' and isinstance(key, tuple):
                 sname, dtype_for_label = key
 
-            # Anzeigename
+            # display name
             display_name = sname
             if mode == 'dts' and sname == "Hit":
                 base = "Standard attack"
@@ -2009,10 +1996,11 @@ class OverlayWindow(QWidget):
         stats.sort(key=lambda s: s['total'], reverse=True)
         return stats
 
+    # ── calculate skill details ──
     def _compute_skill_details(self, skill_name: str):
         """
-        Liefert Detaildaten für eine Zeile aus _build_skill_stats()
-        Rückgabe: dict oder None
+        delivers skill details to skills from _build_skill_stats()
+        return: dict or None
             {
                 'skill': ...,
                 'hits': ...,
@@ -2050,10 +2038,10 @@ class OverlayWindow(QWidget):
 
 
     def _auto_adjust_height(self):
-        """Passt die Fensterhöhe dynamisch an Anzahl der Skill-Zeilen an."""
+        """dynamic adjust window height to amount of skill rows"""
         stats = self._build_skill_stats()
         row_h = 22
-        header_rows = 2      # Spaltenkopf + Summary
+        header_rows = 2     
         visible_rows = max(1, len(stats)) + header_rows
 
         needed = self._table_top_y + visible_rows * row_h \
@@ -2078,21 +2066,19 @@ class OverlayWindow(QWidget):
 
         # --- All targets ---
         if evts:
-            # Dauer für "All" = bis letztes Event dieses Modes
             dur_all = evts[-1]['time']
             rate_all = int(agg['total'] / (dur_all or 1)) if dur_all else 0
             all_label = f"{base}   ({rate_all} {metric_short})"
         else:
             all_label = base
 
-        # --- pro Target gruppieren ---
+        # --- per target ---
         by_enemy = {}
         for e in evts:
             by_enemy.setdefault(e['enemy'], []).append(e)
 
         self.manual_combo.blockSignals(True)
         self.manual_combo.clear()
-        # Eintrag 0 = All
         self.manual_combo.addItem(all_label, userData=None)
 
         for enemy in sorted(by_enemy.keys()):
@@ -2113,18 +2099,18 @@ class OverlayWindow(QWidget):
     def _refresh_view_from_mode(self):
         agg = self._agg()
         evts = agg['events']
-        if self.sel_target:  # „per Target“ Ansicht
+        if self.sel_target:  # per target view
             flt = [e for e in evts if e['enemy'] == self.sel_target]
             total = sum(e['dmg'] for e in flt)
             dur = (flt[-1]['time'] - flt[0]['time']) if len(flt) > 1 else (flt[-1]['time'] if flt else 0.0)
             mx_e = max(flt, key=lambda e: e['dmg']) if flt else None
-        else:                # „Total“
+        else:                # total view
             total = agg['total']
-            # Dauer = bis letztes Event in diesem Mode (nicht global)
+            # duration only until last event in this mode, not global
             dur = evts[-1]['time'] if evts else 0.0
             mx_e = None
             
-        # Timer nur überschreiben, wenn der Kampf NICHT gerade live läuft.
+        # override timer only if fight does not run live
         if not self.manual_running:
             self.combat_time = dur
         if mx_e:
@@ -2133,7 +2119,6 @@ class OverlayWindow(QWidget):
         else:
             self.max_hit = agg['max']; 
             self.max_hit_skill = agg['max_skill']
-        # Pulse-Referenz aus Mode-Recent spiegeln
         self._auto_adjust_height()
         self.update()
 
@@ -2154,7 +2139,7 @@ class OverlayWindow(QWidget):
 
 
     def _combat_dd_label_for_mode(self, snap):
-        """Erzeugt den Text für das 'Select combat'-Dropdown je nach aktuellem Modus."""
+        """Creates text for 'Select combat'-dropdown depending on chosen mode."""
         metric_short = self._metric_short()
         enemy = snap.get('enemy_label', '--')
         time_s = snap.get('time_label', '')
@@ -2164,12 +2149,10 @@ class OverlayWindow(QWidget):
 
         rate = int(total / (dur or 1)) if dur else 0
 
-        # z.B. "Common Forest-boar (09:30)   245 DPS"
+        # e.g.. "Common Forest-boar (09:30)   245 DPS"
         left = f"{enemy}"
         middle = f"({time_s})" if time_s else ""
         right = f"{rate} {metric_short}" if total else ""
-
-        # wir machen es einfach in einer Zeile, leicht „LotRO-Style“
         parts = [p for p in (left, middle, right) if p]
         return "  ".join(parts)
     
@@ -2180,7 +2163,7 @@ class OverlayWindow(QWidget):
                 self.modes[k]['total'] = 0
                 self.modes[k]['max'] = 0
                 self.modes[k]['max_skill'] = '--'
-        # Anzeige-/Laufzeit-Reset
+        # Dispaly/runtime-reset
         self.max_hit = 0
         self.max_hit_skill = '--'
         self.combat_time = 0.0
@@ -2190,12 +2173,12 @@ class OverlayWindow(QWidget):
         self._skill_row_bounds = []        
         self._auto_adjust_height()
         
-    # --- functions for settings menu ---
-        
+
+    # ── functions for settings menu ──    
     def _show_settings_menu(self):
         menu = QMenu(self)
-        act_folder = menu.addAction("Combat log folder…")
-        act_pets = menu.addAction("Custom pet names…")
+        act_folder = menu.addAction("Select combat log folder…")
+        act_pets = menu.addAction("Add custom pet names…")
 
         pos = self.settings_btn.mapToGlobal(self.settings_btn.rect().bottomRight())
         action = menu.exec_(pos)
@@ -2233,10 +2216,10 @@ class OverlayWindow(QWidget):
             self,
             "Combat log folder",
             f"Combat log folder is now:\n{folder_norm}\n\n"
-            "Diese Einstellung wird automatisch gespeichert.",
+            "This setting will be saved to settings.json for further runs.",
         )
     
-    
+    # ── add custom pet names functionality ── 
     def _edit_pet_names(self):
             current_list = PET_NAMES
             current = ", ".join(current_list)
@@ -2257,11 +2240,11 @@ class OverlayWindow(QWidget):
                 QMessageBox.warning(self, "Pet names", "Liste darf nicht komplett leer sein.")
                 return
 
-            # Intern lowercase
+            # intern lowercase
             lowered = [n.lower() for n in names]
             PET_NAMES[:] = lowered
 
-            # Persistieren
+            # make custom names persistent
             self.settings["pet_names"] = list(lowered)
             self._save_settings(self.settings)
 
@@ -2270,12 +2253,13 @@ class OverlayWindow(QWidget):
 
             QMessageBox.information(self, "Pet names", "Pet names updated and saved.")
     
+    # ── add custom pet names menue functionality ── 
     def _edit_custom_pet_names(self):
-        # Defaults & aktuelle Liste
+        # defaults + actual pet list
         default_set = set(config.DEFAULT_PET_NAMES_LOWER)
         all_pets = PET_NAMES
 
-        # Custom = alles, was nicht Default ist
+        # custom = anything not defined by DEFAULT_PET_NAMES dict 
         custom = [n for n in all_pets if n not in default_set]
 
         dlg = QDialog(self)
@@ -2292,7 +2276,7 @@ class OverlayWindow(QWidget):
             list_widget.addItem(item)
         layout.addWidget(list_widget)
 
-        # Eingabe + Add-Button
+        # Inpuit promt and add button
         row = QHBoxLayout()
         edit = QLineEdit()
         edit.setPlaceholderText("Neuer Pet-Name…")
@@ -2322,12 +2306,12 @@ class OverlayWindow(QWidget):
             if not text:
                 return
             lower = text.lower()
-            # ignorieren, wenn default oder schon vorhanden
+            # ignore of in DEFAULT_PET_NAMES or already added
             if lower in default_set or lower in custom:
                 QMessageBox.information(
                     dlg,
                     "Custom pet names",
-                    "Dieser Name ist bereits ein Default oder Custom-Name.",
+                    "This pet name a default pet name or already added to custom names.",
                 )
                 return
             custom.append(lower)
@@ -2358,21 +2342,23 @@ class OverlayWindow(QWidget):
 
         dlg.exec_()
 
-        # Nach Dialog-Ende: Defaults + Custom neu bauen
+        # after dialog: rebuilt new defaults + custom dict
         combined = list(config.DEFAULT_PET_NAMES_LOWER) + [
             n for n in custom if n not in default_set
         ]
         PET_NAMES[:] = combined
 
-        # In Settings speichern (nur Custom!)
+        # safe into settings (only custom!)
         self.settings["custom_pet_names"] = list(custom)
         self._save_settings(self.settings)
 
         if DEBUG_PARSE:
             print("[CFG] PET_NAMES (defaults+custom):", PET_NAMES)   
 
+
+    # ── deal with different resolution by users monitors (might work not 100% well at the time but will do the math for now) ──
     def _adjust_fonts_for_dpi(self):
-        """Sorgt dafür, dass Fonts auf High-DPI-Systemen nicht „riesig“ werden."""
+        """fonts on high dpi-systems won't be shows as huge fonts."""
         app = QGuiApplication.instance()
         if not app:
             return
@@ -2380,14 +2366,14 @@ class OverlayWindow(QWidget):
         if not screen:
             return
 
-        dpi = screen.logicalDotsPerInch()  # 96 auf „normalen“ Systemen
+        dpi = screen.logicalDotsPerInch()  # 96 on normal systems
         scale = dpi / 96.0
 
-        # Wenn der User 100 % Skalierung hat → nichts tun
+        # if users skaled 100%, do nothing
         if scale <= 1.01:
             return
 
-        # Fonts global runterskalieren
+        # downscale global fonts
         fonts = [FONT_TITLE, FONT_SUBTITLE, FONT_BTN_TEXT, FONT_TEXT, FONT_TEXT_CLS_BTN]
         for f in fonts:
             ps = f.pointSizeF()
@@ -2399,7 +2385,7 @@ class OverlayWindow(QWidget):
 
 
     
-    # --- mouse action ---
+    # ── mouse interaction and behavior ──
     def mousePressEvent(self, e):
         from PyQt5.QtCore import Qt
 
@@ -2407,35 +2393,35 @@ class OverlayWindow(QWidget):
             return super().mousePressEvent(e)
 
         y = e.pos().y()
-        pos = e.pos()  # <-- QPoint, nicht nur y
+        pos = e.pos()  # <-- QPoint, not only y
 
-        # 1) Klick in der Titelbar -> Fenster ziehen
+        # 1) click in title bar to move window
         if y <= TITLE_BAR_HEIGHT:
             self._drag_start = e.globalPos() - self.frameGeometry().topLeft()
             e.accept()
             return
 
-        # 2) Klick in einer Skill-Zeile?
+        # 2) click on a skill row in tabel
         for top, bottom, skill in getattr(self, "_skill_row_bounds", []):
             if top <= y <= bottom:
                 self.selected_skill = skill
                 self.update()
                 return
             
-         # 3) Klick auf Summary-Zeile -> zurück auf "All skills"
+         # 3) click on summary ==> return to "All skills"
         if getattr(self, "summary_rect", None) and self.summary_rect.contains(pos):
             self.selected_skill = None
             self.update()
             return
 
-        # 4) Sonst: normales Drag-Verhalten
+        # 4) otherwise: normal drag behavior
         self._drag_start = e.globalPos() - self.frameGeometry().topLeft()
         e.accept()    
             
     def mouseMoveEvent(self, e):
         from PyQt5.QtCore import Qt
 
-        # Drag der Titelbar
+        # drag title bar
         if self._drag_start:
             self.move(e.globalPos() - self._drag_start)
             e.accept()
@@ -2444,19 +2430,19 @@ class OverlayWindow(QWidget):
         pos = e.pos()
         y = pos.y()
 
-        # Hover in Skill-Tabelle?
+        # Hover in skill tables?
         hover_skill = None
         for top, bottom, skill in getattr(self, "_skill_row_bounds", []):
             if top <= y <= bottom:
                 hover_skill = skill
                 break
 
-        # Hover in Summary-Zeile?
+        # Hover in summary row?
         hover_summary = False
         if getattr(self, "summary_rect", None) and self.summary_rect.contains(pos):
             hover_summary = True
 
-        # Nur neu zeichnen, wenn sich was geändert hat
+        # only repaint if anything changed
         if hover_skill != getattr(self, "_hover_skill", None) \
         or hover_summary != getattr(self, "_hover_summary", False):
             self._hover_skill = hover_skill
@@ -2471,7 +2457,7 @@ class OverlayWindow(QWidget):
         self._drag_start = None; super().mouseReleaseEvent(e)
 
     def closeEvent(self, event):
-        # Log-Tailer korrekt stoppen, damit kein Thread überlebt
+        # stop log tail correct, kill any thread
         if hasattr(self, "_stop_log_thread"):
             self._stop_log_thread()
 
