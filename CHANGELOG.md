@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+### release [1.0.0]
+
+- finalized german client support
+- added logic for handle hunter oil skill names
+- add more custom pet names like german cappy pets with crafting armaments
+- fixed some minor bugs and issues
+
+
+### Beta [0.9.9.0] - 2025-11-25
+
+- reworked design and functionality
+- added new features and detailed skill analyzing in real-time
+- added German client parsing (alpha state, has to be tested and missing some information)
+- cleaning code (work in progress)
+- Added setting menu for combat log folder and custom pet names
+- updated missing DE combat log search pattern
+- fixed a bug with failing German parsing line regex patterns
+- add return of stats from German DTPS parsing
+- adjust minor layout issus
+- added font scaling due to some scaling issues occuring with certain windows resolution scalings
+
 
 ### Beta [0.9.8.0] - 2025-10-21
 - reworked parsing logic, now can handle with dot damage, pets, spirits from FM, detection of any sorts of auto attacks
