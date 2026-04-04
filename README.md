@@ -5,7 +5,7 @@ Note: **the EoAparsingOverlay.exe does not access any illegal server stats, it j
 
 ## Installation:
 
-- Download the [EoAparsingOverlay.exe](https://github.com/MaSchm1983/eoa_dps_parser/releases/download/beta-v0.9.9/EoAparsingOverlay.exe) 
+- Download the [EoAparsingOverlay.exe](https://github.com/MaSchm1983/EoAparsingOverlay/releases/download/v1.0.0/EoAparsingOverlay.exe) 
 - Start the **EoAparsingOverlay.exe**
 - Press **Settings** and select the folder where EoA saves your chat logs (typically it is in users ==> documents ==> the lord of the rings online)
 - Optional: Most of the default names of pets, even all names of Captain pets renamed due to using certain armaments should be covered. However, if you have some specific pet names (renamed ingame with /pet rename <name>), you need to add the names using the **Settings** menu one time. You can manage all your pet names here. **Otherwise stats from custom pet names cannot be tracked!!**
