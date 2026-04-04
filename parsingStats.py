@@ -1,5 +1,5 @@
 ###############################################################################
-#######       Echoes of Angmar DPS parsing overlay (beta 0.9.9)         #######
+#######       Echoes of Angmar DPS parsing overlay (v1.0.0)             #######
 ####### ________________________________________________________________#######
 ####### Echoes of Angmar (https://www.echoesofangmar.com/) is a vanilla #######
 ####### version of Lord of the Rings online - Shadows of Angmar as it   #######
@@ -20,11 +20,11 @@
 ####### for testing purposes and giving feedback, anyone else does it   #######
 ####### on his own intention.                                           #######
 ####### --------------------------------------------------------------- #######
-####### Send feedback in Github or ingame to Deladora / Namaleth        #######
+####### Send feedback in Github or ingame to Deladora / Nariala         #######
 ####### Code is free but owner remains the Author:                      #######
 ####### https://github.com/MaSchm1983                                   #######
 ###############################################################################
-####### Copyright (c) 2025 MaSchm1983                                   #######
+####### Copyright (c) 2026 MaSchm1983                                   #######
 ####### Licensed under the MIT License. See LICENSE file for details.   #######
 ###############################################################################
 
@@ -69,10 +69,6 @@ def _clean_dir(p: str) -> str:
     return os.path.normpath(p)
 
 def get_latest_combat_log(folder: str = None):
-    """
-    Suche die aktuellste Combat-Log-Datei.
-    Wenn `folder` None ist, wird config.CMBT_LOG_DIR verwendet.
-    """
     base_raw = folder if folder is not None else config.CMBT_LOG_DIR
     base = _clean_dir(base_raw)
 
@@ -94,13 +90,13 @@ def get_latest_combat_log(folder: str = None):
     files = []
     for pat in patterns:
         hit = glob.glob(pat)
-    #    if DEBUG_PARSE:
-    #        print(f"[LOG] glob {pat} -> {len(hit)}")
+        if DEBUG_PARSE:
+           print(f"[LOG] glob {pat} -> {len(hit)}")
         files.extend(hit)
 
     latest = max(files, key=os.path.getmtime) if files else None
-    # if DEBUG_PARSE:
-    #    print(f"[LOG] latest={latest!r}")
+    if DEBUG_PARSE:
+       print(f"[LOG] latest={latest!r}")
     return latest
 
 # ── Helper to avoid decoding issues ── 
@@ -1496,7 +1492,7 @@ class OverlayWindow(QWidget):
         self._append_evt('dts', evt)
         self._refresh_view_from_mode()
 
-    # ── interaction with start/stop button ──    
+    # ── 6) start and stop parsing ──    
     def _toggle_startstop(self):
         
         if not self.manual_running:
