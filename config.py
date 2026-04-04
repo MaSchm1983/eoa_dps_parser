@@ -80,7 +80,15 @@ DEFAULT_PET_NAMES = [
     "Adler",
     "Luchs",
     "Bär",
+    "Bürger-Herold",
+    "Artilleristinnen-Herold",
+    "Artilleristen-Herold",
+    "Schildmaid-Herold",
+    "Schwerkämpferinnen-Herold",
+    "Pilger-Herold",    
+    "Knappen-Herold",
 ]
+
 DEFAULT_PET_NAMES_LOWER = [n.lower() for n in DEFAULT_PET_NAMES]
 # Aktive Pet-Liste (wird zur Laufzeit überschrieben)
 PET_NAMES = [n.lower() for n in DEFAULT_PET_NAMES]
@@ -108,9 +116,9 @@ HUNTER_SKILL_ALIASES_DE = {
     "Pfeilregen: Feuersturm":      "Pfeilregen",
     "Durchdringender Schuss: Verzehrendes Feuer":  "Durchdringender Schuss",
     # Light oil
-    "Schneller Schuss: Elbenpfeil":       "Schneller Schuss",
-    "Schneller Bogen: Sternenlicht":               "Schneller Bogen",
+    "Schn. Schuss: Elbenpfeil":       "Schneller Schuss",
+    "Schn. Bog.: Sternenlicht":               "Schneller Bogen",
     "Eldar-Pfeil":                   "Stachelpfeil",
-    "Pfeilregen: Himmlisches Licht":      "Pfeilregen",
+    "Pfeilregen: Himml. Licht":      "Pfeilregen",
     "Durchdringender Schuss: Stachel der Dunkelheit":  "Durchdringender Schuss",
 }
