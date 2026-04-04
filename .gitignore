@@ -6,6 +6,5 @@ dist/
 build/
 *.spec
 .DS_Store
-*.ini
 test_*
-combatAnalyseOverlay.py
+*.json
