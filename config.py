@@ -55,7 +55,7 @@ AA_SKILLS = {
     "Waffen-Angriff",
 }
 
-DEBUG_PARSE = True
+DEBUG_PARSE = False
 
 # Default-Pfad – nur Fallback, wenn User noch nichts gesetzt hat
 CMBT_LOG_DIR = r"C:/Users/<username>/Documents/The Lord of the Rings Online"
@@ -84,3 +84,33 @@ DEFAULT_PET_NAMES = [
 DEFAULT_PET_NAMES_LOWER = [n.lower() for n in DEFAULT_PET_NAMES]
 # Aktive Pet-Liste (wird zur Laufzeit überschrieben)
 PET_NAMES = [n.lower() for n in DEFAULT_PET_NAMES]
+
+HUNTER_SKILL_ALIASES = {
+    # Fire oil
+    "Quick Shot: Flaming Arrow":       "Quick Shot",
+    "Swift Bow: Ablaze":               "Swift Bow",
+    "Burning Arrow":                   "Barbed Arrow",
+    "Rain of Arrows: Fire-storm":      "Rain of Arrows",
+    "Penetrating Shot: Burn Through":  "Penetrating Shot",
+    # Light oil
+    "Quick Shot: Elvish Arrow":        "Quick Shot",
+    "Swift Bow: Star-light":           "Swift Bow",
+    "Eldarin Arrow":                   "Barbed Arrow",
+    "Rain of Arrows: Light From The Sky": "Rain of Arrows",
+    "Penetrating Shot: Pierce the Darkness": "Penetrating Shot",
+}
+
+HUNTER_SKILL_ALIASES_DE = {
+    # Fire oil
+    "Flammenpfeil":       "Schneller Schuss",
+    "Schneller Bogen: Flammenmeer":               "Schneller Bogen",
+    "Feuerpfeil":                   "Stachelpfeil",
+    "Pfeilregen: Feuersturm":      "Pfeilregen",
+    "Durchdringender Schuss: Verzehrendes Feuer":  "Durchdringender Schuss",
+    # Light oil
+    "Schneller Schuss: Elbenpfeil":       "Schneller Schuss",
+    "Schneller Bogen: Sternenlicht":               "Schneller Bogen",
+    "Eldar-Pfeil":                   "Stachelpfeil",
+    "Pfeilregen: Himmlisches Licht":      "Pfeilregen",
+    "Durchdringender Schuss: Stachel der Dunkelheit":  "Durchdringender Schuss",
+}
